@@ -79,4 +79,48 @@ class CodificarSenhaAdapterTest {
         erro.printStackTrace(new PrintWriter(representacao));
         assertThat(representacao.toString()).doesNotContain(senha, "Falha contendo");
     }
+
+    @Test
+    void confereSenhaRealPreservandoEspacosEComparandoComHash() {
+        var adapter = new CodificarSenhaAdapter(new SenhasConfig().passwordEncoder());
+        String senha = "  Senha ${LITERAL} de fixture  ";
+        SenhaProtegida hash = adapter.codificar(senha);
+
+        assertThat(adapter.corresponde(senha, hash)).isTrue();
+        assertThat(adapter.corresponde(senha.strip(), hash)).isFalse();
+        assertThat(adapter.corresponde("Outra senha de fixture", hash)).isFalse();
+    }
+
+    @Test
+    void rejeitaVerificacaoInvalidaOuAcimaDoLimiteSemAceitarPrefixoTruncado() {
+        var adapter = new CodificarSenhaAdapter(new SenhasConfig().passwordEncoder());
+        String senha = "a".repeat(72);
+        SenhaProtegida hash = adapter.codificar(senha);
+
+        assertThat(adapter.corresponde(senha, hash)).isTrue();
+        assertThat(adapter.corresponde(senha + "b", hash)).isFalse();
+        assertThat(adapter.corresponde("é".repeat(37), hash)).isFalse();
+        assertThat(adapter.corresponde(null, hash)).isFalse();
+        assertThat(adapter.corresponde("a".repeat(12) + "\uD800", hash)).isFalse();
+    }
+
+    @Test
+    void falhaDaVerificacaoNaoExpoeSenhaHashOuCausa() {
+        String segredo = "Segredo de fixture ${LITERAL}";
+        SenhaProtegida hash = new SenhaProtegida("{bcrypt}$2b$12$" + "C".repeat(53));
+        PasswordEncoder encoder = new PasswordEncoder() {
+            @Override public String encode(CharSequence rawPassword) { throw new UnsupportedOperationException(); }
+            @Override public boolean matches(CharSequence rawPassword, String encodedPassword) {
+                throw new IllegalArgumentException(rawPassword + " " + encodedPassword);
+            }
+        };
+
+        Throwable erro = catchThrowable(() -> new CodificarSenhaAdapter(encoder).corresponde(segredo, hash));
+
+        assertThat(erro).isInstanceOf(IllegalStateException.class)
+                .hasMessage("Não foi possível conferir a senha.").hasNoCause();
+        StringWriter texto = new StringWriter();
+        erro.printStackTrace(new PrintWriter(texto));
+        assertThat(texto.toString()).doesNotContain(segredo, hash.valor());
+    }
 }

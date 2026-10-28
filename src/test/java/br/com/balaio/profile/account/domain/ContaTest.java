@@ -54,4 +54,30 @@ class ContaTest {
                     .isThrownBy(() -> new Conta(ID, nome, EMAIL, SENHA, Papel.COMPRADOR, false));
         }
     }
+
+    @Test
+    void alterarSenhaPreservaDadosERemoveObrigatoriedadeSomenteComNovoHash() {
+        Conta original = new Conta(ID, "Nome", EMAIL, SENHA, Papel.ADMIN, true);
+        SenhaProtegida nova = new SenhaProtegida("{bcrypt}$2b$12$" + "B".repeat(53));
+
+        Conta alterada = original.alterarSenha(nova);
+
+        assertThat(alterada.id()).isEqualTo(original.id());
+        assertThat(alterada.nome()).isEqualTo(original.nome());
+        assertThat(alterada.email()).isEqualTo(original.email());
+        assertThat(alterada.papel()).isEqualTo(original.papel());
+        assertThat(alterada.senhaProtegida()).isEqualTo(nova);
+        assertThat(alterada.trocaSenhaObrigatoria()).isFalse();
+        assertThat(original.senhaProtegida()).isEqualTo(SENHA);
+        assertThat(original.trocaSenhaObrigatoria()).isTrue();
+    }
+
+    @Test
+    void naoPermiteDesativarObrigatoriedadeSemNovoHash() {
+        Conta original = new Conta(ID, "Nome", EMAIL, SENHA, Papel.ADMIN, true);
+
+        assertThatIllegalArgumentException().isThrownBy(() -> original.alterarSenha(null));
+        assertThatIllegalArgumentException().isThrownBy(() -> original.alterarSenha(SENHA));
+        assertThat(original.trocaSenhaObrigatoria()).isTrue();
+    }
 }

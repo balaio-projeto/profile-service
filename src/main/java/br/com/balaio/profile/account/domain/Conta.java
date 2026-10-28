@@ -27,4 +27,24 @@ public record Conta(
         }
         return normalizado;
     }
+
+    public Conta alterarSenha(SenhaProtegida novaSenha) {
+        if (novaSenha == null || novaSenha.equals(senhaProtegida)) {
+            throw new IllegalArgumentException("A alteração exige uma nova senha protegida.");
+        }
+        return new Conta(id, nome, email, novaSenha, papel, false);
+    }
+
+    public Conta alterarPapel(Papel novoPapel, long totalAdministradores) {
+        if (novoPapel == null || totalAdministradores < 0) {
+            throw new IllegalArgumentException("Dados da alteração de papel inválidos.");
+        }
+        if (papel == novoPapel) {
+            return this;
+        }
+        if (papel == Papel.ADMIN && novoPapel != Papel.ADMIN && totalAdministradores <= 1) {
+            throw new UltimoAdministradorException();
+        }
+        return new Conta(id, nome, email, senhaProtegida, novoPapel, trocaSenhaObrigatoria);
+    }
 }
