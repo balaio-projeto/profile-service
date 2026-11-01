@@ -15,6 +15,7 @@ public class AutenticacaoWebConfig implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(origin).addPathPatterns("/api/v1/auth/cadastro", "/api/v1/auth/login",
-                "/api/v1/auth/entrar", "/api/v1/auth/logout");
+                "/api/v1/auth/entrar", "/api/v1/auth/logout", "/api/v1/auth/recuperacao",
+                "/api/v1/auth/redefinicao");
     }
 }

@@ -4,11 +4,26 @@ server:
 spring:
   application:
     name: profile-service
+  mail:
+    host: ${PROFILE_SMTP_HOST:localhost}
+    port: ${PROFILE_SMTP_PORT:1025}
+    username: ${PROFILE_SMTP_USERNAME:}
+    password: ${PROFILE_SMTP_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${PROFILE_SMTP_AUTH:false}
+      mail.smtp.starttls.enable: ${PROFILE_SMTP_STARTTLS:false}
   jpa:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+recovery:
+  frontend-base-url: ${PROFILE_FRONTEND_BASE_URL:http://localhost:4321}
+  from: ${PROFILE_MAIL_FROM:nao-responda@localhost}
+  token-ttl: ${PROFILE_RECOVERY_TOKEN_TTL:PT1H}
 management:
+  health:
+    mail:
+      enabled: false
   endpoints:
     web:
       exposure:

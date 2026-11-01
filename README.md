@@ -17,7 +17,7 @@ No Windows: `.\mvnw.cmd spring-boot:run`. Testes: `.\mvnw.cmd test`.
 
 O `Dockerfile` constrói uma imagem própria. Em `platform`, use `docker compose up --build -d profile-service` para iniciar este serviço e seu banco ou `docker compose --profile extended up --build -d` para iniciar todos. Health: `http://localhost:8082/actuator/health`.
 
-As migrations V1 e V2 já criam contas e o registro singleton de controle administrativo. O Flyway aplica o schema e o Hibernate o valida. Cadastro, login/alias e logout estão disponíveis sob `/api/v1/auth`; as demais rotas de conta mapeadas no gateway ainda dependem de implementação.
+As migrations V1, V2 e V3 criam contas, o registro singleton de controle administrativo e os tokens de recuperação. O Flyway aplica o schema e o Hibernate o valida. Cadastro, login/alias, logout e recuperação estão disponíveis sob `/api/v1/auth`; as demais rotas de conta mapeadas no gateway ainda dependem de implementação.
 
 ## Cadastro público — etapa 2
 
@@ -153,3 +153,15 @@ Os testes cobrem bootstrap com indicador pendente, senha atual correta/incorreta
 Para papéis, os testes verificam autorização pelo estado atual do banco, bloqueio de solicitantes comuns/pendentes, promoção válida, preservação dos demais dados, impossibilidade de autodespromover o último administrador, proteção do remanescente, rollback e duas despromoções concorrentes sob bloqueio PostgreSQL real. Também exercitam a entrada a partir de snapshots externos `REPEATABLE_READ` e tentativas de usar o identificador do alvo como autorização.
 
 O cadastro da etapa 2 inclui adaptador HTTP, aplicação e persistência de contas. A etapa 3 acrescenta login, JWT, cookie e logout, restritos ao profile. Gateway e demais microsserviços não foram alterados. Bootstrap, troca de senha e administração continuam internos, sem novos endpoints administrativos.
+
+## Recuperação de senha — US34
+
+`POST /api/v1/auth/recuperacao` recebe `{ "email": "pessoa@example.test" }`. Para qualquer e-mail válido, cadastrado ou não, retorna **201** com `{ "dados": { "recebida": true }, "erro": null }`. Erros de formato retornam `400 REQUISICAO_INVALIDA`. Para uma conta existente, o serviço gera segredo aleatório de 256 bits, grava somente seu SHA-256 em `password_recovery` e solicita envio de link por e-mail após o commit. Um novo pedido é aceito após um minuto e invalida os links anteriores. A validade padrão é de uma hora.
+
+O link aponta para `${PROFILE_FRONTEND_BASE_URL}/login/reset?token=...`. `POST /api/v1/auth/redefinicao` recebe `{ "token": "...", "novaSenha": "..." }`. Token ausente, vencido, inválido ou já consumido retorna `400 TOKEN_INVALIDO`; nova senha fora da política existente retorna `400 REQUISICAO_INVALIDA`. No sucesso, retorna **200** com `{ "dados": { "redefinida": true }, "erro": null }`. A atualização usa `ContasPort`, a mesma política e o mesmo codificador bcrypt do login PI-168. A troca e o consumo único ocorrem na mesma transação, sob bloqueio da conta, e limpam `troca_senha_obrigatoria` como a alteração de senha existente.
+
+Configure externamente `PROFILE_FRONTEND_BASE_URL`, `PROFILE_RECOVERY_TOKEN_TTL` (ISO-8601, padrão `PT1H`), `PROFILE_MAIL_FROM`, `PROFILE_SMTP_HOST`, `PROFILE_SMTP_PORT`, `PROFILE_SMTP_USERNAME`, `PROFILE_SMTP_PASSWORD`, `PROFILE_SMTP_AUTH` e `PROFILE_SMTP_STARTTLS`. Use URL pública do frontend e credenciais de SMTP em secret store ou `.env` local ignorado pelo Git. Não versione segredos. Falhas de envio são registradas sem endereço, token, link ou senha, e não alteram a resposta pública.
+
+**JWT emitidos antes da redefinição permanecem válidos até expirar.** PI-168 usa JWT RS256 sem lista de revogação nem tabela de sessões; esta integração não cria mecanismo paralelo. O login com a senha antiga falha, e o login com a nova funciona. A revogação imediata de JWT requer decisão de segurança e alteração coordenada dos validadores/consumidores. O logout continua apenas limpando o cookie no navegador, conforme o contrato existente.
+
+Os testes US34 reutilizam o PostgreSQL 18 descartável de `PostgreSQLTestConfiguration`. Execute `.\mvnw.cmd -B -ntp clean verify` com JDK 25 e Docker ativo. O envio externo deve ser validado com uma caixa SMTP controlada e a URL pública do ambiente; os testes automatizados não precisam de credenciais reais.

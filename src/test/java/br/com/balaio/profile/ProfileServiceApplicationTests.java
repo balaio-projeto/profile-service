@@ -27,9 +27,10 @@ class ProfileServiceApplicationTests {
 
 	@Test
 	void aplicaMigrationsSemCriarAdministrador() {
-		assertThat(flyway.info().applied()).hasSize(2);
+		assertThat(flyway.info().applied()).hasSize(3);
 		assertThat(flyway.info().pending()).isEmpty();
 		assertThat(jdbc.queryForObject("select count(*) from contas", Long.class)).isZero();
+		assertThat(jdbc.queryForObject("select count(*) from password_recovery", Long.class)).isZero();
 		assertThat(jdbc.queryForObject("select count(*) from controle_administracao", Long.class)).isEqualTo(1L);
 		assertThat(jdbc.queryForObject(
 				"select bootstrap_concluido from controle_administracao where id = 1", Boolean.class)).isFalse();
