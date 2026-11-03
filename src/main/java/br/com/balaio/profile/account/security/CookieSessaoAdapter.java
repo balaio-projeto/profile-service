@@ -28,6 +28,6 @@ public class CookieSessaoAdapter {
 
     private ResponseCookie.ResponseCookieBuilder cookie(String token, boolean https) {
         return ResponseCookie.from(NOME, token).httpOnly(true).secure(secure || https)
-                .sameSite("Lax").path("/api/v1");
+                .sameSite("Lax").path("/");
     }
 }

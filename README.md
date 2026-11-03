@@ -165,3 +165,8 @@ Configure externamente `PROFILE_FRONTEND_BASE_URL`, `PROFILE_RECOVERY_TOKEN_TTL`
 **JWT emitidos antes da redefinição permanecem válidos até expirar.** PI-168 usa JWT RS256 sem lista de revogação nem tabela de sessões; esta integração não cria mecanismo paralelo. O login com a senha antiga falha, e o login com a nova funciona. A revogação imediata de JWT requer decisão de segurança e alteração coordenada dos validadores/consumidores. O logout continua apenas limpando o cookie no navegador, conforme o contrato existente.
 
 Os testes US34 reutilizam o PostgreSQL 18 descartável de `PostgreSQLTestConfiguration`. Execute `.\mvnw.cmd -B -ntp clean verify` com JDK 25 e Docker ativo. O envio externo deve ser validado com uma caixa SMTP controlada e a URL pública do ambiente; os testes automatizados não precisam de credenciais reais.
+# Vínculo provisório com catálogo de peças
+
+`GET /api/v1/artesao/me` exige Bearer JWT válido, consulta a conta atual e responde `{ "dados": { "id": "<UUID>", "slug": "artesao-<UUID>" }, "erro": null }` para contas com papel `artesao`. Outros papéis recebem 403. O slug é determinístico e estável, sem depender do nome mutável da conta. Ainda não há cadastro de ateliê neste serviço; a página pública do ateliê depende dessa integração futura.
+
+O cookie HttpOnly do JWT usa `Path=/` para alcançar as páginas protegidas do frontend Next; o proxy converte o cookie em Bearer ao encaminhar as rotas de escrita do catálogo e a consulta de `/usuario`. O mesmo cookie continua com `SameSite=Lax` e atributo `Secure` conforme configuração do ambiente.

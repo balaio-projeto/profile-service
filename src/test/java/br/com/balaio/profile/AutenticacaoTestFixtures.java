@@ -62,7 +62,7 @@ public final class AutenticacaoTestFixtures {
         Map<String, String> atributos = Arrays.stream(partes).skip(1).map(parte -> parte.split("=", 2))
                 .collect(Collectors.toMap(parte -> parte[0].toLowerCase(Locale.ROOT),
                         parte -> parte.length == 2 ? parte[1] : ""));
-        assertThat(atributos).containsEntry("path", "/api/v1").containsEntry("max-age", Integer.toString(maxAge))
+        assertThat(atributos).containsEntry("path", "/").containsEntry("max-age", Integer.toString(maxAge))
                 .containsKey("httponly");
         assertThat(atributos.get("samesite")).isEqualToIgnoringCase("Lax");
         assertThat(atributos.containsKey("secure")).isEqualTo(secure);
