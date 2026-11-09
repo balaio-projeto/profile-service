@@ -8,13 +8,14 @@ import br.com.balaio.profile.account.domain.Conta;
 import br.com.balaio.profile.account.domain.Email;
 import br.com.balaio.profile.account.domain.EmailJaCadastradoException;
 import br.com.balaio.profile.account.domain.Papel;
+import br.com.balaio.profile.account.security.CodificarSenhaAdapter;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -22,6 +23,9 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.Arrays;
 import java.util.List;
@@ -33,6 +37,8 @@ import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.reset;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Import(PostgreSQLTestConfiguration.class)
@@ -56,6 +62,12 @@ class CadastroPublicoIntegrationTests {
 	@Autowired
 	private JdbcTemplate jdbc;
 
+	@Autowired
+	private PlatformTransactionManager transactionManager;
+
+	@MockitoSpyBean
+	private CodificarSenhaAdapter codificador;
+
 	@BeforeEach
 	@AfterEach
 	void limparDadosDeTeste() {
@@ -64,26 +76,34 @@ class CadastroPublicoIntegrationTests {
 	}
 
 	@ParameterizedTest
-	@NullSource
-	@ValueSource(strings = {
-			"", "comprador", "artesao", "admin", "ADMIN", "AdMiN", " admin ", "ROLE_ADMIN", "[\"admin\"]",
-			"\u0430dmin", "\uff41\uff44\uff4d\uff49\uff4e"
-	})
-	void cadastroPublicoSemprePersisteCompradorIndependentementeDoPapelEnviado(String papelSolicitado) {
+	@CsvSource({ "comprador, COMPRADOR", "artesao, ARTESAO" })
+	void cadastroPublicoPersisteSomenteOPapelPublicoSolicitado(String papelSolicitado, Papel papel) {
 		ContaPublicaCadastrada resultado = cadastrarContaPublica.cadastrar(
 				new CadastrarContaPublicaComando("Maria Silva", EMAIL, SENHA, papelSolicitado));
 
 		Conta persistida = contas.buscarPorId(resultado.id()).orElseThrow();
-		assertThat(resultado.papel()).isEqualTo(Papel.COMPRADOR);
-		assertThat(persistida.papel()).isEqualTo(Papel.COMPRADOR);
+		assertThat(resultado.papel()).isEqualTo(papel);
+		assertThat(resultado.nome()).isEqualTo("Maria Silva");
+		assertThat(resultado.email()).isEqualTo(EMAIL);
+		assertThat(persistida.papel()).isEqualTo(papel);
 		assertThat(persistida.trocaSenhaObrigatoria()).isFalse();
-		assertThat(contas.contarPorPapel(Papel.COMPRADOR)).isEqualTo(1);
-		assertThat(contas.contarPorPapel(Papel.ARTESAO)).isZero();
+		assertThat(contas.contarPorPapel(papel)).isEqualTo(1);
 		assertThat(contas.contarPorPapel(Papel.ADMIN)).isZero();
 		assertThat(jdbc.queryForObject("select papel from contas where id = ?", String.class, resultado.id()))
-				.isEqualTo("comprador");
+				.isEqualTo(papel.codigo());
 		assertThat(passwordEncoder.matches(SENHA, persistida.senhaProtegida().valor())).isTrue();
 		assertThat(quantidadeContas()).isEqualTo(1);
+		assertThat(bootstrapConcluido()).isFalse();
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "admin", "organizador", "ADMIN", "AdMiN", " admin ", "ARTESAO", " artesao ",
+			"", " ", "ROLE_ADMIN", "[\"admin\"]", "\u0430dmin", "\uff41\uff44\uff4d\uff49\uff4e" })
+	void papelNaoPublicoNaoCriaContaNemAlteraControle(String papel) {
+		assertThatThrownBy(() -> cadastrarContaPublica.cadastrar(new CadastrarContaPublicaComando(
+				"Maria Silva", EMAIL, SENHA, papel)))
+				.isInstanceOf(IllegalArgumentException.class).hasNoCause();
+		assertThat(quantidadeContas()).isZero();
 		assertThat(bootstrapConcluido()).isFalse();
 	}
 
@@ -117,7 +137,7 @@ class CadastroPublicoIntegrationTests {
 
 		assertThatThrownBy(() -> cadastrarContaPublica.cadastrar(new CadastrarContaPublicaComando(
 				"Tentativa de sobrescrita", "  COMPRADOR.INTEGRATION@EXAMPLE.TEST  ",
-				"Bb8!" + UUID.randomUUID(), "admin")))
+				"Bb8!" + UUID.randomUUID(), "artesao")))
 				.isInstanceOf(EmailJaCadastradoException.class).hasNoCause();
 
 		assertThat(contas.buscarPorId(resultado.id())).contains(original);
@@ -127,17 +147,30 @@ class CadastroPublicoIntegrationTests {
 	}
 
 	@Test
-	void resultadoDoCadastroExpoeSomenteIdentificadorEPapel() {
+	void resultadoDoCadastroExpoeSomenteIdentidadePublicaESuaRepresentacaoEhRedigida() {
 		ContaPublicaCadastrada resultado = cadastrarContaPublica.cadastrar(
 				new CadastrarContaPublicaComando("Maria Silva", EMAIL, SENHA));
 
 		assertThat(ContaPublicaCadastrada.class.isRecord()).isTrue();
 		assertThat(Arrays.stream(ContaPublicaCadastrada.class.getRecordComponents()).map(componente -> componente.getName()))
-				.containsExactly("id", "papel");
+				.containsExactly("id", "nome", "email", "papel");
 		assertThat(resultado.id()).isNotNull();
 		assertThat(resultado.papel()).isEqualTo(Papel.COMPRADOR);
-		assertThat(resultado.toString()).doesNotContain(SENHA, EMAIL,
+		assertThat(resultado.nome()).isEqualTo("Maria Silva");
+		assertThat(resultado.email()).isEqualTo(EMAIL);
+		assertThat(resultado.toString()).doesNotContain("Maria Silva", SENHA, EMAIL,
 				contas.buscarPorId(resultado.id()).orElseThrow().senhaProtegida().valor());
+	}
+
+	@Test
+	void rollbackDoCadastroDesfazPersistenciaReal() {
+		new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+			cadastrarContaPublica.cadastrar(new CadastrarContaPublicaComando("Maria Silva", EMAIL, SENHA, "artesao"));
+			assertThat(quantidadeContas()).isEqualTo(1);
+			status.setRollbackOnly();
+		});
+		assertThat(quantidadeContas()).isZero();
+		assertThat(bootstrapConcluido()).isFalse();
 	}
 
 	@ParameterizedTest(name = "entrada invalida [{index}]")
@@ -152,42 +185,50 @@ class CadastroPublicoIntegrationTests {
 
 	@Test
 	void doisCadastrosConcorrentesParaOMesmoEmailResultamEmUmaUnicaConta() throws Exception {
-		CountDownLatch prontos = new CountDownLatch(2);
-		CountDownLatch iniciar = new CountDownLatch(1);
+		CountDownLatch consultasConcluidas = new CountDownLatch(2);
+		CountDownLatch liberarCodificacao = new CountDownLatch(1);
+		// O encoder so e chamado depois do SELECT de duplicidade. A barreira garante
+		// que os dois SELECTs viram ausencia antes de qualquer INSERT ser iniciado.
+		doAnswer(chamada -> {
+			consultasConcluidas.countDown();
+			if (!liberarCodificacao.await(20, TimeUnit.SECONDS)) {
+				throw new IllegalStateException("Barreira de codificacao do teste expirou");
+			}
+			return chamada.callRealMethod();
+		}).when(codificador).codificar(SENHA);
 		List<Object> resultados;
 		try (var executor = Executors.newFixedThreadPool(2)) {
-			var primeira = executor.submit(() -> cadastrarConcorrentemente(EMAIL, prontos, iniciar));
-			var segunda = executor.submit(() -> cadastrarConcorrentemente("  COMPRADOR.INTEGRATION@EXAMPLE.TEST  ", prontos, iniciar));
+			var primeira = executor.submit(() -> cadastrarConcorrentemente(EMAIL, "comprador"));
+			var segunda = executor.submit(() -> cadastrarConcorrentemente("  COMPRADOR.INTEGRATION@EXAMPLE.TEST  ", "artesao"));
 			try {
-				assertThat(prontos.await(10, TimeUnit.SECONDS)).isTrue();
-				iniciar.countDown();
-				resultados = List.of(primeira.get(30, TimeUnit.SECONDS), segunda.get(30, TimeUnit.SECONDS));
+				assertThat(consultasConcluidas.await(15, TimeUnit.SECONDS)).isTrue();
+				liberarCodificacao.countDown();
+				resultados = List.of(primeira.get(45, TimeUnit.SECONDS), segunda.get(45, TimeUnit.SECONDS));
 			} finally {
-				iniciar.countDown();
+				liberarCodificacao.countDown();
 			}
+		} finally {
+			liberarCodificacao.countDown();
+			reset(codificador);
 		}
 
 		assertThat(resultados.stream().filter(ContaPublicaCadastrada.class::isInstance).toList()).hasSize(1);
 		assertThat(resultados.stream().filter(Throwable.class::isInstance).toList())
 				.singleElement().isInstanceOf(EmailJaCadastradoException.class);
 		assertThat(quantidadeContas()).isEqualTo(1);
-		assertThat(contas.contarPorPapel(Papel.COMPRADOR)).isEqualTo(1);
+		assertThat(contas.contarPorPapel(Papel.COMPRADOR) + contas.contarPorPapel(Papel.ARTESAO)).isEqualTo(1);
 		assertThat(contas.contarPorPapel(Papel.ADMIN)).isZero();
 		assertThat(bootstrapConcluido()).isFalse();
 		assertThat(passwordEncoder.matches(SENHA, contas.buscarPorEmail(new Email(EMAIL)).orElseThrow().senhaProtegida().valor()))
 				.isTrue();
+		ContaPublicaCadastrada vencedor = resultados.stream().filter(ContaPublicaCadastrada.class::isInstance)
+				.map(ContaPublicaCadastrada.class::cast).findFirst().orElseThrow();
+		assertThat(contas.buscarPorEmail(new Email(EMAIL)).orElseThrow().papel()).isEqualTo(vencedor.papel());
 	}
 
-	private Object cadastrarConcorrentemente(String email, CountDownLatch prontos, CountDownLatch iniciar) {
-		prontos.countDown();
+	private Object cadastrarConcorrentemente(String email, String papel) {
 		try {
-			if (!iniciar.await(15, TimeUnit.SECONDS)) {
-				throw new IllegalStateException("Tempo esgotado aguardando inicio do cadastro concorrente no teste");
-			}
-			return cadastrarContaPublica.cadastrar(new CadastrarContaPublicaComando("Maria Silva", email, SENHA, "admin"));
-		} catch (InterruptedException exception) {
-			Thread.currentThread().interrupt();
-			throw new IllegalStateException(exception);
+			return cadastrarContaPublica.cadastrar(new CadastrarContaPublicaComando("Maria Silva", email, SENHA, papel));
 		} catch (RuntimeException exception) {
 			return exception;
 		}

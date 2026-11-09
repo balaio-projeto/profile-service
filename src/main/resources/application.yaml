@@ -1,14 +1,39 @@
 server:
   port: ${PROFILE_SERVICE_PORT:8082}
+  forward-headers-strategy: none
 spring:
   application:
     name: profile-service
+  mail:
+    host: ${PROFILE_SMTP_HOST:localhost}
+    port: ${PROFILE_SMTP_PORT:1025}
+    username: ${PROFILE_SMTP_USERNAME:}
+    password: ${PROFILE_SMTP_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${PROFILE_SMTP_AUTH:false}
+      mail.smtp.starttls.enable: ${PROFILE_SMTP_STARTTLS:false}
   jpa:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+recovery:
+  frontend-base-url: ${PROFILE_FRONTEND_BASE_URL:http://localhost:4321}
+  from: ${PROFILE_MAIL_FROM:nao-responda@localhost}
+  token-ttl: ${PROFILE_RECOVERY_TOKEN_TTL:PT1H}
 management:
+  health:
+    mail:
+      enabled: false
   endpoints:
     web:
       exposure:
         include: health,info
+balaio:
+  auth:
+    jwt:
+      private-key-location: ${JWT_PRIVATE_KEY_LOCATION:}
+      issuer: ${JWT_ISSUER:}
+      audience: ${JWT_AUDIENCE:}
+    cookie:
+      secure: ${AUTH_COOKIE_SECURE:true}
+    allowed-origins: ${AUTH_ALLOWED_ORIGINS:}

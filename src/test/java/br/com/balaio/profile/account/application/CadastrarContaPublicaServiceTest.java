@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
@@ -55,8 +56,36 @@ class CadastrarContaPublicaServiceTest {
         assertThat(salva.senhaProtegida()).isEqualTo(HASH);
         assertThat(resultado.id()).isEqualTo(salva.id());
         assertThat(resultado.papel()).isEqualTo(Papel.COMPRADOR);
+        assertThat(resultado.nome()).isEqualTo(salva.nome());
+        assertThat(resultado.email()).isEqualTo(salva.email().valor());
         verify(senhas).codificar(SENHA);
         verify(contas).buscarPorEmail(new Email("maria+loja@example.test"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({ "comprador, COMPRADOR", "artesao, ARTESAO" })
+    void preservaSomenteOPapelPublicoSolicitado(String codigo, Papel papel) {
+        prepararCadastroValido();
+
+        var resultado = service.cadastrar(new CadastrarContaPublicaComando(
+                "Maria Silva", "maria@example.test", SENHA, codigo));
+
+        var captor = ArgumentCaptor.forClass(Conta.class);
+        verify(contas).salvar(captor.capture());
+        assertThat(captor.getValue().papel()).isEqualTo(papel);
+        assertThat(captor.getValue().trocaSenhaObrigatoria()).isFalse();
+        assertThat(resultado.papel()).isEqualTo(papel);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "admin", "organizador", "ADMIN", "AdMiN", " admin ", "ARTESAO", " artesao",
+            "", " ", "ROLE_ADMIN", "comprador,admin", "[\"admin\"]", "\u0430dmin", "\uff41\uff44\uff4d\uff49\uff4e" })
+    void rejeitaPapelInvalidoOuPrivilegiadoAntesDeQualquerIo(String papel) {
+        assertThatThrownBy(() -> service.cadastrar(new CadastrarContaPublicaComando(
+                "Maria Silva", "maria@example.test", SENHA, papel)))
+                .isInstanceOf(IllegalArgumentException.class).hasNoCause();
+
+        verifyNoInteractions(contas, senhas);
     }
 
     @ParameterizedTest(name = "entrada invalida [{index}]")
@@ -75,7 +104,7 @@ class CadastrarContaPublicaServiceTest {
         when(contas.buscarPorEmail(email)).thenReturn(Optional.of(existente));
 
         assertThatThrownBy(() -> service.cadastrar(new CadastrarContaPublicaComando(
-                "Outra conta", " MARIA@EXAMPLE.TEST ", SENHA, "admin")))
+                "Outra conta", " MARIA@EXAMPLE.TEST ", SENHA, "artesao")))
                 .isInstanceOf(EmailJaCadastradoException.class).hasNoCause();
 
         verifyNoInteractions(senhas);
@@ -119,13 +148,21 @@ class CadastrarContaPublicaServiceTest {
         assertThat(comando.toString()).doesNotContain(comando.nome(), comando.email(), SENHA);
     }
 
+    @Test
+    void resultadoNaoRevelaDadosPessoaisSenhaOuHashNaRepresentacaoTextual() {
+        prepararCadastroValido();
+        var resultado = service.cadastrar(comandoValido());
+
+        assertThat(resultado.toString()).doesNotContain("Maria Silva", "maria@example.test", SENHA, HASH.valor());
+    }
+
     private void prepararCadastroValido() {
         when(contas.buscarPorEmail(any(Email.class))).thenReturn(Optional.empty());
         when(senhas.codificar(SENHA)).thenReturn(HASH);
     }
 
     private CadastrarContaPublicaComando comandoValido() {
-        return new CadastrarContaPublicaComando("Maria Silva", "maria@example.test", SENHA, "admin");
+        return new CadastrarContaPublicaComando("Maria Silva", "maria@example.test", SENHA, "comprador");
     }
 
     private static Stream<Arguments> entradasInvalidas() {

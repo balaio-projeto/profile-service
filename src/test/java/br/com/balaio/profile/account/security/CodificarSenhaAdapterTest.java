@@ -14,6 +14,40 @@ import br.com.balaio.profile.account.domain.SenhaProtegida;
 
 class CodificarSenhaAdapterTest {
     @Test
+    void comparacaoDeContaAusenteUsaBcryptDummyGeradoSomenteNaInicializacao() {
+        var encoderReal = new SenhasConfig().passwordEncoder();
+        var recebida = new AtomicReference<CharSequence>();
+        var hashRecebido = new AtomicReference<String>();
+        var codificacoes = new java.util.concurrent.atomic.AtomicInteger();
+        PasswordEncoder encoder = new PasswordEncoder() {
+            @Override
+            public String encode(CharSequence senha) {
+                codificacoes.incrementAndGet();
+                return encoderReal.encode(senha);
+            }
+
+            @Override
+            public boolean matches(CharSequence senha, String hash) {
+                recebida.set(senha);
+                hashRecebido.set(hash);
+                return encoderReal.matches(senha, hash);
+            }
+        };
+        var adapter = new CodificarSenhaAdapter(encoder);
+        adapter.prepararVerificacaoFicticia();
+        String senhaLiteral = "  literal ${FIXTURE}  ";
+
+        adapter.verificarContaAusente(senhaLiteral);
+        String primeiroHash = hashRecebido.get();
+        adapter.verificarContaAusente(senhaLiteral);
+
+        assertThat(recebida.get()).isEqualTo(senhaLiteral);
+        assertThat(primeiroHash).matches("\\{bcrypt\\}\\$2[aby]\\$12\\$[./A-Za-z0-9]{53}");
+        assertThat(hashRecebido.get()).isEqualTo(primeiroHash);
+        assertThat(codificacoes.get()).isEqualTo(1);
+    }
+
+    @Test
     void configuracaoRealGeraBcryptComPrefixoCusto12ESalAleatorio() {
         PasswordEncoder encoder = new SenhasConfig().passwordEncoder();
         var adapter = new CodificarSenhaAdapter(encoder);

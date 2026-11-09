@@ -4,4 +4,6 @@ import br.com.balaio.profile.account.domain.SenhaProtegida;
 
 public interface VerificarSenhaPort {
     boolean corresponde(String senha, SenhaProtegida senhaProtegida);
+
+    void verificarContaAusente(String senha);
 }
