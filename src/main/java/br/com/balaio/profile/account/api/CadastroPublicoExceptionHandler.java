@@ -13,16 +13,38 @@ import br.com.balaio.profile.account.application.AutenticacaoException;
 import br.com.balaio.profile.account.application.CredenciaisInvalidasException;
 import br.com.balaio.profile.account.application.LoginInvalidoException;
 import br.com.balaio.profile.account.domain.EmailJaCadastradoException;
+import br.com.balaio.profile.account.application.AlteracaoSenhaException;
 
 @RestControllerAdvice(assignableTypes = { CadastroPublicoController.class, AutenticacaoController.class,
         UsuarioAtualController.class })
 public class CadastroPublicoExceptionHandler {
+
     @ExceptionHandler(AcessoNegadoException.class)
-    public ResponseEntity<CadastroPublicoResposta<Void>> naoAutenticado() {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+    public ResponseEntity<CadastroPublicoResposta<Void>> acessoNegado(
+            AcessoNegadoException exception) {
+
+        boolean naoAutenticado =
+                exception.motivo() == AcessoNegadoException.Motivo.NAO_AUTENTICADO
+                        || exception.motivo() == AcessoNegadoException.Motivo.CONTA_INDISPONIVEL;
+
+        HttpStatus status = naoAutenticado
+                ? HttpStatus.UNAUTHORIZED
+                : HttpStatus.FORBIDDEN;
+
+        String codigo = naoAutenticado
+                ? "NAO_AUTENTICADO"
+                : "SEM_PERMISSAO";
+
+        String mensagem = naoAutenticado
+                ? "Autenticação necessária."
+                : "Operação não permitida.";
+
+        return ResponseEntity.status(status)
                 .header("Cache-Control", "no-store")
-                .body(new CadastroPublicoResposta<>(null,
-                        new CadastroPublicoResposta.Erro("NAO_AUTENTICADO", "Autenticação necessária.")));
+                .body(new CadastroPublicoResposta<>(
+                        null,
+                        new CadastroPublicoResposta.Erro(codigo, mensagem)
+                ));
     }
 
     @ExceptionHandler({ CadastroPublicoInvalidoException.class, LoginInvalidoException.class,
@@ -56,6 +78,26 @@ public class CadastroPublicoExceptionHandler {
     public ResponseEntity<CadastroPublicoResposta<Void>> falhaInesperada() {
         return erro(HttpStatus.INTERNAL_SERVER_ERROR, "AUTENTICACAO_INDISPONIVEL",
                 new AutenticacaoException().getMessage());
+    }
+
+    @ExceptionHandler(AlteracaoSenhaException.class)
+    public ResponseEntity<CadastroPublicoResposta<Void>> erroAlteracaoSenha(
+            AlteracaoSenhaException exception) {
+
+        if (exception.motivo()
+                == AlteracaoSenhaException.Motivo.CONFLITO_ATUALIZACAO) {
+            return erro(
+                    HttpStatus.CONFLICT,
+                    "CONFLITO_ATUALIZACAO",
+                    exception.getMessage()
+            );
+        }
+
+        return erro(
+                HttpStatus.BAD_REQUEST,
+                "ALTERACAO_SENHA_INVALIDA",
+                exception.getMessage()
+        );
     }
 
     private ResponseEntity<CadastroPublicoResposta<Void>> erro(HttpStatus status, String codigo, String mensagem) {
