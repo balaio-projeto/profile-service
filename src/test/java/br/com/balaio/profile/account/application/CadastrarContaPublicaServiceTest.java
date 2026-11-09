@@ -25,6 +25,7 @@ import org.mockito.ArgumentCaptor;
 
 import br.com.balaio.profile.account.application.port.out.CodificarSenhaPort;
 import br.com.balaio.profile.account.application.port.out.ContasPort;
+import br.com.balaio.profile.account.application.port.out.CriarPerfilInicialPort;
 import br.com.balaio.profile.account.domain.Conta;
 import br.com.balaio.profile.account.domain.Email;
 import br.com.balaio.profile.account.domain.EmailJaCadastradoException;
@@ -36,7 +37,7 @@ class CadastrarContaPublicaServiceTest {
     private static final SenhaProtegida HASH = new SenhaProtegida("{bcrypt}$2b$12$" + "A".repeat(53));
     private final ContasPort contas = mock(ContasPort.class);
     private final CodificarSenhaPort senhas = mock(CodificarSenhaPort.class);
-    private final CadastrarContaPublicaService service = new CadastrarContaPublicaService(contas, senhas);
+    private final CadastrarContaPublicaService service = new CadastrarContaPublicaService(contas, senhas, mock(CriarPerfilInicialPort.class));
 
     @Test
     void cadastraCompradorComIdentidadePropriaNomeEmailNormalizadosESenhaExata() {
