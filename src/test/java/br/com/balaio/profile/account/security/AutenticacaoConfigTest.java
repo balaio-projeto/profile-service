@@ -9,12 +9,15 @@ import java.io.StringWriter;
 import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.security.KeyPairGenerator;
 import java.security.KeyFactory;
 import java.security.interfaces.RSAPrivateCrtKey;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.security.spec.RSAPrivateCrtKeySpec;
+import java.security.spec.X509EncodedKeySpec;
+import java.util.Base64;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -30,6 +33,22 @@ import br.com.balaio.profile.AutenticacaoTestFixtures;
 class AutenticacaoConfigTest {
     @TempDir
     Path temporario;
+
+    @Test
+    void chaveLocalPersistePrivadaEPublicaCorrespondente() throws Exception {
+        var config = new AutenticacaoConfig();
+        Path privada = temporario.resolve("privada/jwt-private.pem");
+        Path publica = temporario.resolve("publica/jwt-public.pem");
+        var primeira = config.chaveLocal(privada, publica);
+        var segunda = config.chaveLocal(privada, publica);
+        assertThat(segunda.getEncoded()).isEqualTo(primeira.getEncoded());
+        String pem = Files.readString(publica, StandardCharsets.US_ASCII);
+        String corpo = pem.replace("-----BEGIN PUBLIC KEY-----", "")
+                .replace("-----END PUBLIC KEY-----", "").replaceAll("\\s", "");
+        var chavePublica = (RSAPublicKey) KeyFactory.getInstance("RSA").generatePublic(
+                new X509EncodedKeySpec(Base64.getDecoder().decode(corpo)));
+        assertThat(chavePublica.getModulus()).isEqualTo(primeira.getModulus());
+    }
 
     @Test
     void carregaArquivoPkcs8Rsa3072EDerivaPublicaSemOutroArquivo() {

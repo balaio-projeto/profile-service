@@ -11,7 +11,9 @@ FROM eclipse-temurin:25-jre-alpine
 
 WORKDIR /app
 
-RUN addgroup -S app && adduser -S -G app app
+RUN addgroup -S app && adduser -S -G app app \
+    && mkdir -p /run/keys-private /run/keys-public \
+    && chown app:app /run/keys-private /run/keys-public
 
 COPY --from=build --chown=app:app /workspace/target/*.jar /app/app.jar
 

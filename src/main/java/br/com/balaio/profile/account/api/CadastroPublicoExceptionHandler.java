@@ -15,7 +15,7 @@ import br.com.balaio.profile.account.application.LoginInvalidoException;
 import br.com.balaio.profile.account.domain.EmailJaCadastradoException;
 
 @RestControllerAdvice(assignableTypes = { CadastroPublicoController.class, AutenticacaoController.class,
-        UsuarioAtualController.class })
+        UsuarioAtualController.class, ArtesaoAtualController.class })
 public class CadastroPublicoExceptionHandler {
     @ExceptionHandler(AcessoNegadoException.class)
     public ResponseEntity<CadastroPublicoResposta<Void>> naoAutenticado() {
