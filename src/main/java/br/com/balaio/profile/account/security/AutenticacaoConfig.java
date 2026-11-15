@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyFactory;
+import java.security.KeyPairGenerator;
 import java.security.SecureRandom;
 import java.security.Signature;
 import java.security.interfaces.RSAPrivateCrtKey;
@@ -19,6 +20,7 @@ import java.util.Base64;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
@@ -34,10 +36,21 @@ public class AutenticacaoConfig {
     }
 
     @Bean
+    public RSAPrivateKey chavePrivadaJwt(AutenticacaoProperties properties, Environment environment) {
+        if ("local-generated".equals(properties.jwt().privateKeyLocation())
+                && !environment.matchesProfiles("local"))
+            throw new IllegalStateException("Chave JWT local permitida apenas no perfil local.");
+        return chavePrivadaJwt(properties);
+    }
+
     public RSAPrivateKey chavePrivadaJwt(AutenticacaoProperties properties) {
         byte[] codificada = null;
         try {
             String local = properties.jwt().privateKeyLocation();
+            if ("local-generated".equals(local)) {
+                return chaveLocal(Path.of("/run/keys-private/jwt-private.pem"),
+                        Path.of("/run/keys-public/jwt-public.pem"));
+            }
             Path arquivo;
             if (local.startsWith("file:")) {
                 URI uri = new URI(local);
@@ -79,6 +92,41 @@ public class AutenticacaoConfig {
                 Arrays.fill(codificada, (byte) 0);
             }
         }
+    }
+
+    RSAPrivateKey chaveLocal(Path privadaLocal, Path publicaLocal) throws Exception {
+        Files.createDirectories(privadaLocal.getParent());
+        Files.createDirectories(publicaLocal.getParent());
+        if (!Files.exists(privadaLocal)) {
+            var gerador = KeyPairGenerator.getInstance("RSA");
+            gerador.initialize(3072);
+            var par = gerador.generateKeyPair();
+            String pem = "-----BEGIN PRIVATE KEY-----\n"
+                    + Base64.getMimeEncoder(64, new byte[]{'\n'}).encodeToString(par.getPrivate().getEncoded())
+                    + "\n-----END PRIVATE KEY-----\n";
+            Files.writeString(privadaLocal, pem, StandardCharsets.US_ASCII);
+        }
+        // A chave publica é sempre derivada da privada persistida, inclusive após reinício.
+        var privada = lerChavePrivada(privadaLocal);
+        var rsa = (RSAPrivateCrtKey) privada;
+        var publica = (RSAPublicKey) KeyFactory.getInstance("RSA").generatePublic(
+                new RSAPublicKeySpec(rsa.getModulus(), rsa.getPublicExponent()));
+        String pemPublico = "-----BEGIN PUBLIC KEY-----\n"
+                + Base64.getMimeEncoder(64, new byte[]{'\n'}).encodeToString(publica.getEncoded())
+                + "\n-----END PUBLIC KEY-----\n";
+        Files.writeString(publicaLocal, pemPublico, StandardCharsets.US_ASCII);
+        return privada;
+    }
+
+    private RSAPrivateKey lerChavePrivada(Path arquivo) throws Exception {
+        String pem = Files.readString(arquivo, StandardCharsets.US_ASCII).strip();
+        String base64 = pem.substring("-----BEGIN PRIVATE KEY-----".length(),
+                pem.length() - "-----END PRIVATE KEY-----".length()).replaceAll("\\s", "");
+        var chave = KeyFactory.getInstance("RSA").generatePrivate(
+                new PKCS8EncodedKeySpec(Base64.getDecoder().decode(base64)));
+        if (!(chave instanceof RSAPrivateCrtKey rsa) || rsa.getModulus().bitLength() < 3072)
+            throw new IllegalArgumentException();
+        return rsa;
     }
 
     @Bean

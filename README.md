@@ -52,6 +52,7 @@ O cadastro persiste somente hash bcrypt com salt; usa o índice único existente
 - `POST /api/v1/auth/login` e alias temporário `/api/v1/auth/entrar`: recebem JSON com `email` e `senha`; retornam 200 com `{dados:usuarioPublico,erro:null}` e cookie `balaio_sessao`.
 - `POST /api/v1/auth/cadastro`: retorna 201 e emite o mesmo cookie após persistir a conta.
 - `POST /api/v1/auth/logout`: retorna 200 com `{dados:{encerrada:true},erro:null}` e expira o cookie, mesmo sem sessão ou com um token inválido/expirado.
+- `GET /api/v1/artesao/me`: exige Bearer JWT válido de conta com papel atual `artesao`; retorna `{dados:{id,slug:"artesao-<UUID>"},erro:null}`. Comprador e administrador recebem 403. O catálogo usa essa identidade antes de publicar peças.
 
 Login usa e-mail normalizado, senha literal e bcrypt existentes; não aplica retroativamente a política de cadastro. UUID e papel vêm exclusivamente da conta persistida, independentemente de campos extras enviados pelo cliente. Conta ausente e senha incorreta retornam o mesmo **401 / CREDENCIAIS_INVALIDAS**; uma comparação bcrypt fictícia, com hash gerado no startup, reduz a diferença de processamento entre esses caminhos. Dados inválidos retornam **400 / REQUISICAO_INVALIDA** e falhas internas de autenticação retornam **500 / AUTENTICACAO_INDISPONIVEL**, sem expor causas ou credenciais. Erros mantêm `{dados:null,erro:{codigo,mensagem}}` e não emitem sessão.
 
@@ -65,7 +66,7 @@ Cookie: `balaio_sessao`, `HttpOnly`, `SameSite=Lax`, `Path=/api/v1`, sem `Domain
 
 O serviço exige a configuração no startup e falha com mensagem sanitizada se ela estiver ausente/inválida:
 
-- `JWT_PRIVATE_KEY_LOCATION`: caminho absoluto ou URI `file:` de arquivo PEM PKCS#8 RSA CRT, no mínimo 3072 bits. Não aceita `classpath:`, URL remota, chave pública no lugar da privada, arquivo vazio/inválido ou chave fraca. O conteúdo não deve ser colocado em uma variável de ambiente.
+- `JWT_PRIVATE_KEY_LOCATION`: caminho absoluto ou URI `file:` de arquivo PEM PKCS#8 RSA CRT, no mínimo 3072 bits. Não aceita `classpath:`, URL remota, chave pública no lugar da privada, arquivo vazio/inválido ou chave fraca. No perfil `local`, o Compose usa `local-generated` para gerar a chave privada em volume próprio e publicar apenas a chave pública em outro volume. Fora do perfil `local`, esse valor é recusado. O conteúdo não deve ser colocado em uma variável de ambiente.
 - `JWT_ISSUER`: emissor não vazio acordado com os consumidores.
 - `JWT_AUDIENCE`: audiência não vazia acordada com os consumidores.
 - `AUTH_ALLOWED_ORIGINS`: origens públicas exatas separadas por vírgula, com esquema/host/porta e sem caminho, query, fragmento, credenciais ou wildcard. Exemplo local: `http://localhost:4321`; `127.0.0.1` é uma origem diferente.
@@ -82,7 +83,7 @@ openssl pkey -in <arquivo-privado-externo.pem> -pubout -out <arquivo-publico-ext
 
 Somente o profile recebe o arquivo privado. Gateway e serviços receberão apenas o arquivo **público** por configuração, usando os mesmos valores de issuer/audience na integração futura. Não distribuir a privada, imprimir seus componentes ou gerar arquivos dentro do Git. Os comandos são exemplos de procedimento, não foram executados para criar uma chave de ambiente nesta entrega. [OpenSSL genpkey](https://docs.openssl.org/3.5/man1/openssl-genpkey/), [OpenSSL pkey](https://docs.openssl.org/3.5/man1/openssl-pkey/).
 
-O Compose atual precisa receber o mount e essas variáveis para iniciar o profile; esta etapa não altera `platform` ou gateway. Uma substituição de chave deve ser coordenada com os consumidores: não há JWKS/rotação dinâmica nesta entrega e tokens emitidos com a chave anterior podem deixar de ser aceitos antes dos 60 minutos.
+O Compose local monta os volumes de chave automaticamente; fora do perfil `local`, forneça a chave privada e as variáveis de autenticação por ambiente. Uma substituição de chave deve ser coordenada com os consumidores: não há JWKS/rotação dinâmica nesta entrega e tokens emitidos com a chave anterior podem deixar de ser aceitos antes dos 60 minutos.
 
 ### Origin e limites da integração
 
@@ -107,6 +108,8 @@ Essa validação fica restrita à consulta de usuário. Regras de autorização 
 O domínio de `account` não depende de Spring ou JPA. Contas têm um único papel (`comprador`, `artesao` ou `admin`), e-mail normalizado/único, hash bcrypt e `trocaSenhaObrigatoria`. O cadastro público aceita exclusivamente `comprador` ou `artesao`; `admin` e `organizador` são rejeitados. A instrução da etapa 2 substitui a regra anterior que sempre cadastrava comprador.
 
 O bootstrap usa `ADMIN_EMAIL` e `ADMIN_SENHA_INICIAL` enquanto o marcador estiver pendente. Cria o administrador com troca obrigatória e confirma o controle na mesma transação, sob bloqueio no PostgreSQL. Depois da conclusão, reinícios não redefinem senha ou papel. Credenciais não são gravadas no código nem registradas em mensagens.
+
+No perfil `local`, quando ambas as variáveis estão ausentes, o bootstrap é ignorado para permitir o primeiro start sem `admin.env`. Se uma delas for informada, a validação existente continua exigindo o par válido.
 
 `spring-security-crypto` fornece o `PasswordEncoder` bcrypt de custo 12. `spring-security-oauth2-jose` fornece assinatura RS256; não foi adicionada cadeia global de autenticação HTTP. `spring-boot-testcontainers` e o módulo PostgreSQL existem somente em escopo de teste.
 
