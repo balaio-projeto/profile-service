@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 import br.com.balaio.profile.account.application.port.in.CadastrarContaPublicaUseCase;
 import br.com.balaio.profile.account.application.port.out.CodificarSenhaPort;
 import br.com.balaio.profile.account.application.port.out.ContasPort;
+import br.com.balaio.profile.account.application.port.out.CriarPerfilInicialPort;
 import br.com.balaio.profile.account.domain.Conta;
 import br.com.balaio.profile.account.domain.Email;
 import br.com.balaio.profile.account.domain.EmailJaCadastradoException;
@@ -18,10 +19,13 @@ import br.com.balaio.profile.account.domain.PoliticaSenha;
 public class CadastrarContaPublicaService implements CadastrarContaPublicaUseCase {
     private final ContasPort contas;
     private final CodificarSenhaPort senhas;
+    private final CriarPerfilInicialPort perfisIniciais;
 
-    public CadastrarContaPublicaService(ContasPort contas, CodificarSenhaPort senhas) {
+    public CadastrarContaPublicaService(ContasPort contas, CodificarSenhaPort senhas,
+                                        CriarPerfilInicialPort perfisIniciais) {
         this.contas = contas;
         this.senhas = senhas;
+        this.perfisIniciais = perfisIniciais;
     }
 
     @Override
@@ -50,6 +54,9 @@ public class CadastrarContaPublicaService implements CadastrarContaPublicaUseCas
             var conta = new Conta(UUID.randomUUID(), nome, email,
                     senhas.codificar(comando.senha()), papel, false);
             contas.salvar(conta);
+            if (papel == Papel.ARTESAO) {
+                perfisIniciais.criarParaConta(conta);
+            }
             return new ContaPublicaCadastrada(conta.id(), conta.nome(), conta.email().valor(), conta.papel());
         } catch (EmailJaCadastradoException exception) {
             throw exception;
