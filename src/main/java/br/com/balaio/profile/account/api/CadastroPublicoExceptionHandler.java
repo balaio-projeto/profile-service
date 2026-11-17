@@ -16,7 +16,7 @@ import br.com.balaio.profile.account.domain.EmailJaCadastradoException;
 import br.com.balaio.profile.account.application.AlteracaoSenhaException;
 
 @RestControllerAdvice(assignableTypes = { CadastroPublicoController.class, AutenticacaoController.class,
-        UsuarioAtualController.class, ArtesaoAtualController.class })
+        UsuarioAtualController.class })
 public class CadastroPublicoExceptionHandler {
 
     @ExceptionHandler(AcessoNegadoException.class)

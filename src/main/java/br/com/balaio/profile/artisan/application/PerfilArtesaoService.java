@@ -10,8 +10,6 @@ import br.com.balaio.profile.account.domain.Conta;
 import br.com.balaio.profile.account.domain.Papel;
 import br.com.balaio.profile.artisan.api.PerfilArtesaoRequest;
 import br.com.balaio.profile.artisan.domain.PerfilArtesao;
-import java.text.Normalizer;
-import java.util.Locale;
 import java.util.UUID;
 import java.util.Map;
 import java.util.List;
@@ -47,13 +45,13 @@ public class PerfilArtesaoService implements CriarPerfilInicialPort {
                 .orElseThrow(PerfilNaoEncontradoException::new);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public PerfilArtesao consultarMeu(IdentidadeAutenticada identidade) {
         var conta = autenticar(identidade);
         exigirArtesao(conta.papel());
 
         return perfis.buscarPorContaId(conta.id())
-                .orElseThrow(PerfilNaoEncontradoException::new);
+                .orElseGet(() -> salvarPerfilInicial(conta));
     }
 
     /** Cria o perfil publico na mesma transacao do cadastro da conta artesã. */
@@ -70,16 +68,20 @@ public class PerfilArtesaoService implements CriarPerfilInicialPort {
             throw new PerfilDuplicadoException();
         }
 
+        salvarPerfilInicial(conta);
+    }
+
+    private PerfilArtesao salvarPerfilInicial(Conta conta) {
         String nome = conta.nome();
         String prefixo = "Ateliê de ";
 
         String atelie = prefixo + nome.substring(
                 0, Math.min(nome.length(), 240 - prefixo.length()));
 
-        perfis.salvar(new PerfilArtesao(
+        return perfis.salvar(new PerfilArtesao(
                 UUID.randomUUID(),
                 conta.id(),
-                slug(nome, conta.id()),
+                slugDaConta(conta.id()),
                 nome,
                 atelie,
                 "",
@@ -102,7 +104,7 @@ public class PerfilArtesaoService implements CriarPerfilInicialPort {
             throw new PerfilDuplicadoException();
         }
 
-        String slug = slug(conta.nome(), conta.id());
+        String slug = slugDaConta(conta.id());
 
         PerfilArtesao novo = new PerfilArtesao(
                 UUID.randomUUID(),
@@ -261,21 +263,7 @@ public class PerfilArtesaoService implements CriarPerfilInicialPort {
         }
     }
 
-    private String slug(String nome, UUID id) {
-        String base = Normalizer.normalize(
-                        nome, Normalizer.Form.NFD)
-                .replaceAll("\\p{M}+", "")
-                .toLowerCase(Locale.ROOT)
-                .replaceAll("[^a-z0-9]+", "-")
-                .replaceAll("^-|-$", "");
-
-        if (base.isBlank()) {
-            base = "artesao";
-        }
-
-        return base.substring(
-                        0, Math.min(70, base.length()))
-                .replaceAll("-$", "")
-                + "-" + id.toString().substring(0, 8);
+    public static String slugDaConta(UUID contaId) {
+        return "artesao-" + contaId;
     }
 }

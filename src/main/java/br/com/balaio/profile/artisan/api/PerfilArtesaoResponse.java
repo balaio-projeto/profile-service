@@ -19,7 +19,7 @@ public record PerfilArtesaoResponse(
 ) {
     public static PerfilArtesaoResponse de(PerfilArtesao perfil) {
         return new PerfilArtesaoResponse(
-                perfil.id(),
+                perfil.contaId(),
                 perfil.slug(),
                 perfil.nome(),
                 perfil.atelie(),
