@@ -25,9 +25,14 @@ public class RecoveryController {
 
     @PostMapping("/redefinicao")
     public ResponseEntity<ApiResponse<ResetReceipt>> reset(@RequestBody Reset request) {
-        if (request.token() == null || request.token().isBlank() || request.token().length() > 128
-                || !service.reset(request.token(), request.novaSenha()))
+        if (tokenMalformado(request.token()) || !service.reset(request.token(), request.novaSenha()))
             return ResponseEntity.badRequest().body(ApiResponse.error("TOKEN_INVALIDO", "Link inválido ou expirado. Solicite outro link."));
         return ResponseEntity.ok(ApiResponse.ok(new ResetReceipt(true)));
+    }
+
+    private boolean tokenMalformado(String token) {
+        return token == null
+                || token.isBlank()
+                || token.length() > 128;
     }
 }
