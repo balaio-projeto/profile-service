@@ -14,8 +14,8 @@ public class PerfilArtesaoJpaEntity {
     @Column(name = "id", nullable = false, updatable = false)
     private UUID id;
 
-    // Apenas o UUID: a conta pertence ao modulo account deste microsservico.
-    @Column(name = "conta_id", nullable = false, unique = true, updatable = false)
+    // Perfis legados da vitrine são públicos e não têm conta capaz de editá-los.
+    @Column(name = "conta_id", unique = true, updatable = false)
     private UUID contaId;
 
     @Column(name = "slug", nullable = false, unique = true, length = 90)
