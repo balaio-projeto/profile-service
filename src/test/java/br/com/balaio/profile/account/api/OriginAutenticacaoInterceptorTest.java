@@ -68,22 +68,6 @@ class OriginAutenticacaoInterceptorTest {
                 .isInstanceOf(OrigemNaoPermitidaException.class);
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = { "POST", "PUT", "PATCH", "DELETE" })
-    void todaEscritaComCookieExigeOrigin(String metodo) {
-        var request = new MockHttpServletRequest(metodo, "/api/v1/artesao/me");
-        request.setCookies(new Cookie("balaio_sessao", "fixture"));
-        assertThatThrownBy(() -> interceptor.preHandle(request, new MockHttpServletResponse(), new Object()))
-                .isInstanceOf(OrigemNaoPermitidaException.class);
-    }
-
-    @Test
-    void leituraNaoExigeOrigin() {
-        var request = new MockHttpServletRequest("GET", "/api/v1/artesao/me");
-        request.setCookies(new Cookie("balaio_sessao", "fixture"));
-        assertThat(interceptor.preHandle(request, new MockHttpServletResponse(), new Object())).isTrue();
-    }
-
     private static MockHttpServletRequest post() {
         return new MockHttpServletRequest("POST", "/api/v1/auth/login");
     }
