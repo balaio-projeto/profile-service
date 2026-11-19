@@ -96,6 +96,11 @@ class PerfilArtesaoServiceTest {
         }
 
         @Override
+        public Optional<PerfilArtesao> buscarPorSlugParaAtualizar(String slug) {
+            return buscarPorSlug(slug);
+        }
+
+        @Override
         public Optional<PerfilArtesao> buscarPorContaId(UUID contaId) {
             return salvos.stream().filter(perfil -> perfil.contaId().equals(contaId)).findFirst();
         }
