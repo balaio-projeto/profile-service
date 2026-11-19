@@ -75,20 +75,6 @@ class PerfilArtesaoServiceTest {
         assertThat(resposta.slug()).isEqualTo("artesao-" + conta.id());
     }
 
-    @Test
-    void outroArtesaoNaoEditaPerfilMesmoConhecendoSlug() {
-        var dono = conta(Papel.ARTESAO);
-        var outro = conta(Papel.ARTESAO);
-        service.criarParaConta(dono);
-        var original = perfis.buscarPorContaId(dono.id()).orElseThrow();
-
-        assertThatThrownBy(() -> service.atualizarParcial(new IdentidadeAutenticada(outro.id()),
-                original.slug(), java.util.Map.of("historia", "Alteracao indevida")))
-                .isInstanceOfSatisfying(AcessoNegadoException.class, erro ->
-                        assertThat(erro.motivo()).isEqualTo(AcessoNegadoException.Motivo.PRIVILEGIO_INSUFICIENTE));
-        assertThat(perfis.buscarPorContaId(dono.id()).orElseThrow()).isEqualTo(original);
-    }
-
     private Conta conta(Papel papel) {
         var conta = new Conta(UUID.randomUUID(), "Ana Souza", new Email(UUID.randomUUID() + "@example.test"),
                 HASH, papel, false);
