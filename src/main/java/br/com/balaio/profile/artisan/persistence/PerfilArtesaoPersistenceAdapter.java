@@ -10,6 +10,8 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class PerfilArtesaoPersistenceAdapter implements PerfilArtesaoPort {
     private final SpringDataPerfilArtesaoRepository repository;
+    @jakarta.persistence.PersistenceContext
+    private jakarta.persistence.EntityManager entityManager;
     public PerfilArtesaoPersistenceAdapter(SpringDataPerfilArtesaoRepository repository) {
         this.repository = repository;
     }
@@ -21,6 +23,12 @@ public class PerfilArtesaoPersistenceAdapter implements PerfilArtesaoPort {
     }
     public Optional<PerfilArtesao> buscarPorContaId(UUID contaId) {
         return repository.findByContaId(contaId).map(PerfilArtesaoJpaEntity::dominio);
+    }
+    public Optional<PerfilArtesao> buscarPorSlugParaAtualizar(String slug) {
+        return repository.findBySlug(slug).map(entity -> {
+            entityManager.refresh(entity, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+            return entity.dominio();
+        });
     }
     public PerfilArtesao salvar(PerfilArtesao perfil) {
         return repository.save(PerfilArtesaoJpaEntity.de(perfil)).dominio();

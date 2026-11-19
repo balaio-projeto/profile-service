@@ -106,6 +106,8 @@ public class PerfilArtesaoService implements CriarPerfilInicialPort {
 
         String slug = slugDaConta(conta.id());
 
+        validarReferenciaGerenciada(request.imagem(), null);
+
         PerfilArtesao novo = new PerfilArtesao(
                 UUID.randomUUID(),
                 conta.id(),
@@ -139,7 +141,8 @@ public class PerfilArtesaoService implements CriarPerfilInicialPort {
             Map<String, Object> campos) {
 
         var conta = autenticar(identidade);
-        PerfilArtesao atual = consultar(slug);
+        PerfilArtesao atual = perfis.buscarPorSlugParaAtualizar(slug)
+                .orElseThrow(PerfilNaoEncontradoException::new);
 
         boolean dono = conta.id().equals(atual.contaId())
                 && conta.papel() == Papel.ARTESAO;
@@ -214,6 +217,7 @@ public class PerfilArtesaoService implements CriarPerfilInicialPort {
             throw new PerfilInvalidoException(erros);
         }
 
+        validarReferenciaGerenciada(candidato.imagem(), atual.imagem());
         return perfis.salvar(new PerfilArtesao(
                 atual.id(),
                 atual.contaId(),
@@ -229,6 +233,13 @@ public class PerfilArtesaoService implements CriarPerfilInicialPort {
 
     private String opcional(String valor) {
         return valor == null ? "" : valor;
+    }
+
+    private void validarReferenciaGerenciada(String imagem, String atual) {
+        if (imagem != null && imagem.startsWith(br.com.balaio.profile.artisan.media.MidiaPerfil.PREFIXO_PUBLICO)
+                && !imagem.equals(atual)) {
+            throw new PerfilInvalidoException(Map.of("imagem", "Utilize a operacao de midia para vincular esta imagem."));
+        }
     }
 
     private String imagemOuPadrao(String valor) {

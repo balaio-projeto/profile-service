@@ -168,7 +168,199 @@ Configure externamente `PROFILE_FRONTEND_BASE_URL`, `PROFILE_RECOVERY_TOKEN_TTL`
 **JWT emitidos antes da redefinição permanecem válidos até expirar.** PI-168 usa JWT RS256 sem lista de revogação nem tabela de sessões; esta integração não cria mecanismo paralelo. O login com a senha antiga falha, e o login com a nova funciona. A revogação imediata de JWT requer decisão de segurança e alteração coordenada dos validadores/consumidores. O logout continua apenas limpando o cookie no navegador, conforme o contrato existente.
 
 Os testes US34 reutilizam o PostgreSQL 18 descartável de `PostgreSQLTestConfiguration`. Execute `.\mvnw.cmd -B -ntp clean verify` com JDK 25 e Docker ativo. O envio externo deve ser validado com uma caixa SMTP controlada e a URL pública do ambiente; os testes automatizados não precisam de credenciais reais.
+## Midias do perfil — PI-214, Etapa 3
 
+Branch baseada em `origin/PI-171` no commit `1e5beb3`.
+O modulo `artisan.media` prepara operacoes de aplicacao para enviar, substituir,
+recuperar e remover imagens. Os controllers atuais continuam usando os contratos
+do PI-171. A Etapa 4 acrescenta os endpoints HTTP descritos abaixo.
+
+O adapter usa AWS SDK Java v2 2.42.22, cliente sincrono e path-style. Recebe
+`MEDIA_S3_ENDPOINT`, `MEDIA_S3_REGION`, `MEDIA_S3_BUCKET`,
+`MEDIA_S3_ACCESS_KEY_ID` e `MEDIA_S3_SECRET_ACCESS_KEY`. As credenciais devem ser
+da identidade consumidora provisionada pelo platform. Sem endpoint configurado,
+os recursos existentes iniciam normalmente e operacoes S3 falham com erro de
+indisponibilidade. Endpoint configurado exige credenciais explicitas.
+
+V7 acrescenta `midias_perfil`, com UUID, perfil proprietario, chave, MIME, tamanho,
+SHA-256, estado e data. Bytes permanecem somente no storage. O bucket e uma
+configuracao da instalacao; sua alteracao requer migrar os objetos existentes.
+O campo `imagem` guarda a referencia `/api/v1/arquivos/perfis/{midiaId}`, independente
+do slug. A Etapa 4 disponibiliza este caminho. DTOs HTTP continuam
+devolvendo `imagem`, sem serializar as chaves internas de `MidiaPerfil`.
+
+JPEG/PNG/WebP sao decodificados, com limite de 2 MiB e 20 milhoes de pixels antes
+da alocacao do raster. TwelveMonkeys ImageIO 3.12.0 acrescenta leitura WebP ao
+ImageIO do Java. O arquivo e mantido no formato original.
+
+O upload reserva uma linha PENDING e envia ao S3 fora de transacao de banco.
+A ativacao bloqueia a linha do perfil, troca `imagem` e marca a anterior DELETE
+na mesma transacao. Exclusao logica restaura o placeholder antes da exclusao
+fisica. O worker consulta a fila a cada 60 segundos. A V8 registra no PostgreSQL
+`proxima_tentativa`, reservando cada exclusao por cinco minutos antes da chamada
+S3. Falhas e interrupcoes preservam esse prazo. Outros registros elegiveis podem
+avancar enquanto a tentativa anterior aguarda. DELETEs repetidos sao idempotentes.
+Linhas PENDING ou referencias abandonadas pelo PATCH aguardam 24 horas para
+reconciliacao, inclusive apos crash ou resultado incerto de commit. A limpeza
+confere novamente o vinculo sob bloqueio e nunca exclui uma imagem referenciada.
+O intervalo pode ser configurado por `balaio.media.cleanup-delay`.
+
+O PATCH preserva referencias legadas e aceita a referencia gerenciada atual.
+Uma referencia gerenciada diferente deve ser vinculada pela operacao de midia.
+O mesmo bloqueio e refresh coordenam PATCH e upload concorrentes. A V8 troca a
+foreign key da midia para `ON DELETE RESTRICT`, bloqueando exclusao do perfil e
+o cascade da conta enquanto existirem metadados de midia, inclusive pendentes.
+O futuro fluxo de exclusao de contas devera solicitar limpeza de todas as midias
+do perfil, aguardar confirmacao fisica e somente entao excluir a conta. Essa
+protecao impede perder chaves S3 e ainda exige o futuro fluxo de orquestracao.
+
+Erros de limpeza registram somente UUID da midia, etapa e categoria controlada.
+Quando a selecao da fila falha, o identificador aparece como indisponivel.
+Mensagens de excecao, chaves S3, credenciais e conteudo nao entram nesses logs.
+
+Testes requerem Java 25 e Docker para PostgreSQL descartavel. Execute
+`./mvnw test`. `S3MidiaIntegrationTest` e habilitado quando `MEDIA_S3_ENDPOINT`
+esta definido e usa somente o par consumidor, criando e removendo um objeto
+diagnostico unico em `profile/diagnostics/`. Nunca passar segredos literais na
+linha de comando ou publicar a configuracao resolvida do Compose.
+
+Validacao em 12/11/2026 com Java 25 em container e fontes copiados para tmpfs
+Linux para evitar latencia do bind Windows. `mvn -o -B -ntp test` concluiu com
+558 testes, zero falhas/erros e um teste S3 condicional ignorado. Esse teste foi
+executado separadamente contra SeaweedFS 4.53 com o par consumidor e passou.
+Os testes de banco usam PostgreSQL descartavel e verificam V5, associacao,
+rollback, placeholder, slug alterado, concorrencia com PATCH e upload sem
+transacao aberta. A V5 ainda sera aplicada ao ambiente principal ao publicar
+a imagem do servico na etapa de integracao.
+
+Revisao 3.1 em 13/11/2026 — o banco persistente local consultado estava na V4.
+A V5 foi preservada e as correcoes usam uma V6 aditiva, compativel com instalacoes
+que ja tenham aplicado V5. As provas de retomada recriam o worker usando a fila
+persistida no PostgreSQL descartavel, simulando interrupcao antes do DELETE e
+apos o DELETE antes da confirmacao. Os testes tambem cobrem 20 falhas persistentes
+com progresso do lote seguinte, vinculo reativado e bloqueio do cascade.
+
+Validacao 3.1 — a suite completa concluiu com 569 testes, zero falhas/erros e
+um teste S3 condicional ignorado. O teste S3 foi executado separadamente e passou
+contra o SeaweedFS local com a credencial consumidora. Foram acrescentados seis
+testes de persistencia/retomada e cinco testes de logs. A V6 foi aplicada somente
+nos PostgreSQL descartaveis da suite; o banco persistente local permanece na V4.
+
+### Endpoints de imagens da Etapa 4
+
+Todos os caminhos usam `/api/v1`. PUT e DELETE em `/artesao/me/imagem` exigem
+JWT e conta artesao verificada no PostgreSQL. O proprietario vem da sessao.
+PUT recebe `multipart/form-data`, campo `arquivo`, e substitui a imagem atual.
+DELETE restaura `/fotos/ImagemBase.webp`, mantendo a limpeza fisica posterior.
+Ambos retornam HTTP 200 com o perfil atualizado no envelope `{dados, erro}`,
+usando o mesmo `PerfilArtesaoResponse` do PI-171.
+
+GET e HEAD em `/arquivos/perfis/{midiaId}` sao publicos porque os perfis do
+contrato atual sao publicos. Exigem midia ACTIVE e vinculo atual com `imagem`.
+Imagens pendentes, substituidas ou removidas retornam 404. GET devolve bytes com
+MIME validado e SHA-256 conferido. HEAD consulta somente metadados vinculados,
+sem download S3. Ambos incluem Content-Length, Content-Type,
+`X-Content-Type-Options=nosniff` e `Cache-Control=no-store` para conferir o vinculo
+em cada leitura. O UUID permanece estavel se o slug mudar.
+
+O Profile aplica 2 MiB por arquivo, 3 MiB por requisicao multipart e gravacao
+temporaria em disco a partir de zero bytes. A resolucao lazy permite tratar
+erros no envelope HTTP. Os limites continuam validos com transferencia chunked.
+A aplicacao carrega o arquivo limitado em memoria apos autorizar o artesao.
+O gateway encaminha o corpo em streaming e recusa antecipadamente um tamanho
+declarado acima de 3 MiB nessa rota. A verificacao efetiva de cada arquivo e de
+requisicoes sem Content-Length acontece no Profile. Formatos e limite de
+20 milhoes de pixels usam `ValidarImagem`.
+
+Erros usam o envelope existente. Os codigos HTTP sao 400 para arquivo vazio,
+ausente ou requisicao invalida, 401 para sessao ausente/invalida, 403 para papel
+ou origem recusados, 404 para midia indisponivel, 413 para tamanho excedido,
+415 para formato nao suportado, 409 para conflito e 503 para indisponibilidade.
+Excecoes S3 e SQL nao sao serializadas. Cookies nas mutacoes exigem Origin
+permitido, inclusive no acesso direto ao Profile.
+
+No platform, atualize somente os dois servicos com
+`docker compose up --build -d --no-deps profile-service api-gateway`.
+Em bancos compativeis com a develop ate V5, Flyway aplica V7/V8. Veja a nota de compatibilidade abaixo antes de atualizar bancos antigos.
+O frontend devera enviar FormData e resolver o caminho de `imagem` pelo gateway
+na Etapa 5. Os endpoints JSON e o campo `imagem` mantem os contratos do PI-171.
+
+As propriedades multipart seguem a documentacao oficial do Spring Boot.
+[Referencia de propriedades](https://docs.spring.io/spring-boot/appendix/application-properties/)
+
+Validacao da Etapa 4 em 13/11/2026 — Java 25 em container, PostgreSQL descartavel
+e SeaweedFS 4.53 local. A suite Profile concluiu com 587 testes, zero falhas/erros
+e um teste S3 condicional ignorado. Gateway concluiu 231 testes, zero falhas/erros.
+Foram acrescentados 18 casos HTTP no Profile e oito no gateway. A regressao inclui
+as provas anteriores de concorrencia com PATCH, reserva persistida de limpeza e
+protecao ON DELETE RESTRICT.
+
+Integracao real em http://localhost:8080, com conta artesao descartavel criada e
+autenticada via HTTP. Upload WebP com Bearer, substituicao PNG com cookie/Origin,
+GET anonimo e HEAD passaram. SHA-256 original e recuperado identicos para ambas
+as imagens. URLs substituidas/removidas retornaram 404 em GET e HEAD. DELETE
+retornou o perfil com placeholder. Content-Type incorreto retornou 415 no envelope.
+Envios explicitamente chunked acima de 2 MiB e 3 MiB retornaram 413 pelo gateway.
+
+Hashes dos arquivos diagnosticos publicos usados no teste, em hexadecimal
+`c90cff659645a312a28804965f3dbc34061338f7234ff5d6ddb2c57e9eadec15` para WebP e
+`fa137cfeddf9be254e60055e23c43d5b8663f5292b3cf1453cd52cd2d7d9fcd7` para PNG.
+V5 e V6 foram aplicadas automaticamente ao banco local na publicacao desta etapa.
+As evidencias de V4 nas secoes anteriores descrevem o estado anterior.
+
+A integracao com FormData, proxy e exibicao no navegador pertence a Etapa 5.
+O teste HTTP desta etapa valida a cadeia gateway -> Profile -> S3.
+
+A limpeza fisica foi confirmada pelo worker antes da exclusao de cada conta
+exclusiva de diagnostico. Conferencia final encontrou zero contas/metadados dessas
+fixtures, 13 containers saudaveis, os 11 containers fora da atualizacao com os
+mesmos IDs, seis volumes originais e nove arquivos locais protegidos com hashes
+identicos. A busca em memoria pelas quatro credenciais S3 reais encontrou zero
+ocorrencias nos arquivos entregaveis e nos logs dos tres servicos conferidos.
+
+## Integracao PI-214 sobre develop — 19/11/2026
+
+A base desta entrega e `1adaab1`. O PI-171 atual e a refatoracao de recuperacao
+foram preservados: DTO com id da conta, slug `artesao-<UUID da conta>`, criacao
+do perfil no primeiro acesso de artesao antigo e um unico GET `/artesao/me`.
+As adicoes de midia nao substituem esses contratos.
+
+As evidencias V5/V6 nas secoes historicas acima descrevem a branch original
+`feat/pi-214-entrega-profile-service`, que continua preservada. Na integracao
+atual, V1 a V5 da develop permanecem byte a byte iguais. Midia entra em duas
+novas migrations V7/V8; a numeracao V6 fica reservada a entrega legada.
+
+Banco que ja aplicou a antiga `V5__create_midias_perfil.sql` e
+`V6__protect_media_cleanup.sql` NAO e compativel automaticamente com esta
+linhagem. Nao executar repair, alterar checksums ou apagar tabelas/volumes.
+A transicao desse banco exige planejamento separado, copia protegida e prova
+de restauracao. O ambiente novo baseado na develop usa V5 de slugs + V7/V8.
+Nenhum banco persistente foi migrado durante a resolucao dos conflitos.
+
+Sem MEDIA_S3_ENDPOINT, o servico inicia e as operacoes que necessitam do S3
+retornam indisponibilidade; nunca ha fallback anonimo. Executar o preparador
+explicito do Platform habilita o endpoint local e preserva credenciais existentes.
+O perfil `storage` deve ser iniciado junto ao servico quando midia for habilitada.
+
+Testes novos cobrem a atualizacao de um banco V5 da develop sem perda de perfil
+ou alteracao dos checksums anteriores, e upload de um artesao sem perfil,
+preservando o identificador e slug definidos pelo PI-171.
+
+Foi reproduzida uma interrupcao de conexao em uploads rejeitados acima de 3 MiB.
+O limite de descarte do Tomcat foi ajustado de forma finita para 4 MiB, permitindo
+receber o envelope HTTP 413. Isso nao aumenta o limite aceito de arquivo (2 MiB)
+nem de requisicao multipart (3 MiB).
+Referencia: [HTTP Connector / maxSwallowSize](https://tomcat.apache.org/tomcat-11.0-doc/config/http.html).
+
+### Validacao desta integracao
+
+Em 19/11/2026: build limpo e suite completa com 611 casos, zero falhas/erros
+e um teste S3 condicional ignorado. Os 19 casos HTTP passaram, incluindo o
+HTTP 413 acima dos limites. Upgrade V5 da develop -> V7/V8 foi testado em
+PostgreSQL descartavel, preservando perfil, imagem legada e checksums V1-V5.
+A politica S3 real foi validada separadamente no Platform com quatro
+credenciais aleatorias, dados em tmpfs e nenhum volume da aplicacao.
+Nenhum banco ou container da aplicacao foi atualizado nesta resolucao.
 
 ## PI-169 — Origin nas alteracoes de perfil
 
