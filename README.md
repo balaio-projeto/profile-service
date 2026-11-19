@@ -361,3 +361,20 @@ PostgreSQL descartavel, preservando perfil, imagem legada e checksums V1-V5.
 A politica S3 real foi validada separadamente no Platform com quatro
 credenciais aleatorias, dados em tmpfs e nenhum volume da aplicacao.
 Nenhum banco ou container da aplicacao foi atualizado nesta resolucao.
+
+## PI-169 — Origin nas alteracoes de perfil
+
+O interceptor existente cobre tambem POST/PATCH de /api/v1/artesao/me e
+PATCH de /api/v1/artesaos/{slug}, alem do caminho de imagem do PI-214.
+Metodos de leitura continuam publicos conforme seus contratos. Escrita com
+cookie balaio_sessao exige Origin permitido; Origin externo e recusado.
+Clientes exclusivamente Bearer continuam funcionando sem Origin. JWT,
+consulta do papel atual no banco, propriedade e guard administrativo com
+bloqueio do ultimo administrador permanecem inalterados.
+
+PerfilOriginHttpTest usa JWT real emitido pelo Profile e PostgreSQL descartavel
+para verificar os dois caminhos de edicao diretamente, sem Gateway.
+As funcionalidades futuras de selo/curadoria (PI-177) e organizador (PI-210)
+nao foram implementadas. A permissao administrativa de PATCH de perfil que ja
+existia foi preservada; PI-172 descreve dono e precisa ser conciliado com a
+excecao administrativa documentada pelo fluxo atual, sem ampliar acesso aqui.
