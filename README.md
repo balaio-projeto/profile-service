@@ -168,3 +168,21 @@ Configure externamente `PROFILE_FRONTEND_BASE_URL`, `PROFILE_RECOVERY_TOKEN_TTL`
 **JWT emitidos antes da redefinição permanecem válidos até expirar.** PI-168 usa JWT RS256 sem lista de revogação nem tabela de sessões; esta integração não cria mecanismo paralelo. O login com a senha antiga falha, e o login com a nova funciona. A revogação imediata de JWT requer decisão de segurança e alteração coordenada dos validadores/consumidores. O logout continua apenas limpando o cookie no navegador, conforme o contrato existente.
 
 Os testes US34 reutilizam o PostgreSQL 18 descartável de `PostgreSQLTestConfiguration`. Execute `.\mvnw.cmd -B -ntp clean verify` com JDK 25 e Docker ativo. O envio externo deve ser validado com uma caixa SMTP controlada e a URL pública do ambiente; os testes automatizados não precisam de credenciais reais.
+
+
+## PI-169 — Origin nas alteracoes de perfil
+
+O interceptor existente cobre tambem POST/PATCH de /api/v1/artesao/me e
+PATCH de /api/v1/artesaos/{slug}, alem do caminho de imagem do PI-214.
+Metodos de leitura continuam publicos conforme seus contratos. Escrita com
+cookie balaio_sessao exige Origin permitido; Origin externo e recusado.
+Clientes exclusivamente Bearer continuam funcionando sem Origin. JWT,
+consulta do papel atual no banco, propriedade e guard administrativo com
+bloqueio do ultimo administrador permanecem inalterados.
+
+PerfilOriginHttpTest usa JWT real emitido pelo Profile e PostgreSQL descartavel
+para verificar os dois caminhos de edicao diretamente, sem Gateway.
+As funcionalidades futuras de selo/curadoria (PI-177) e organizador (PI-210)
+nao foram implementadas. A permissao administrativa de PATCH de perfil que ja
+existia foi preservada; PI-172 descreve dono e precisa ser conciliado com a
+excecao administrativa documentada pelo fluxo atual, sem ampliar acesso aqui.

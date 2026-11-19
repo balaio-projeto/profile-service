@@ -23,7 +23,7 @@ public class OriginAutenticacaoInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        if (!"POST".equals(request.getMethod())) {
+        if (!Set.of("POST", "PUT", "PATCH", "DELETE").contains(request.getMethod())) {
             return true;
         }
         var recebidas = Collections.list(request.getHeaders(HttpHeaders.ORIGIN));
