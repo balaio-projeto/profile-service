@@ -30,14 +30,17 @@ public class PerfilArtesaoController {
     private final PerfilArtesaoService service;
     private final ValidarSessaoAdapter sessoes;
     private final MidiaPerfilService midias;
+    private final br.com.balaio.profile.curation.SelosRepository selos;
 
     public PerfilArtesaoController(
             PerfilArtesaoService service,
             ValidarSessaoAdapter sessoes,
-            MidiaPerfilService midias) {
+            MidiaPerfilService midias,
+            br.com.balaio.profile.curation.SelosRepository selos) {
         this.service = service;
         this.sessoes = sessoes;
         this.midias = midias;
+        this.selos = selos;
     }
 
     @PutMapping(value = "/artesao/me/imagem", consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
@@ -72,9 +75,10 @@ public class PerfilArtesaoController {
             value = "/artesaos",
             produces = MediaType.APPLICATION_JSON_VALUE)
     public CadastroPublicoResposta<List<PerfilArtesaoResponse>> listar() {
+        var verificados = selos.verificados();
         return new CadastroPublicoResposta<>(
                 service.listar().stream()
-                        .map(PerfilArtesaoResponse::de)
+                        .map(perfil -> PerfilArtesaoResponse.de(perfil, verificados.contains(perfil.id())))
                         .toList(),
                 null);
     }
@@ -164,6 +168,6 @@ public class PerfilArtesaoController {
     private CadastroPublicoResposta<PerfilArtesaoResponse> resposta(
             br.com.balaio.profile.artisan.domain.PerfilArtesao perfil) {
         return new CadastroPublicoResposta<>(
-                PerfilArtesaoResponse.de(perfil), null);
+                PerfilArtesaoResponse.de(perfil, selos.verificado(perfil.id())), null);
     }
 }

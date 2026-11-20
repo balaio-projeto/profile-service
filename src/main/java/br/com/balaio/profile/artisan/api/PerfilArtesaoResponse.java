@@ -17,7 +17,7 @@ public record PerfilArtesaoResponse(
         double avaliacaoMedia,
         boolean selo
 ) {
-    public static PerfilArtesaoResponse de(PerfilArtesao perfil) {
+    public static PerfilArtesaoResponse de(PerfilArtesao perfil, boolean selo) {
         return new PerfilArtesaoResponse(
                 perfil.contaId(),
                 perfil.slug(),
@@ -29,7 +29,7 @@ public record PerfilArtesaoResponse(
                 perfil.imagem(),
                 0L,
                 0.0,
-                false
+                selo
         );
     }
 }

@@ -69,7 +69,7 @@ class PerfilArtesaoServiceTest {
         var conta = conta(Papel.ARTESAO);
         service.criarParaConta(conta);
 
-        var resposta = PerfilArtesaoResponse.de(perfis.buscarPorContaId(conta.id()).orElseThrow());
+        var resposta = PerfilArtesaoResponse.de(perfis.buscarPorContaId(conta.id()).orElseThrow(), false);
 
         assertThat(resposta.id()).isEqualTo(conta.id());
         assertThat(resposta.slug()).isEqualTo("artesao-" + conta.id());

@@ -41,6 +41,83 @@ PostgreSQL do Profile, inclusive após reinício; GET não depende de memória l
 
 Testes adicionais: `PreferenciasHttpTest` (PostgreSQL descartável e HTTP real).
 
+## PI-177 — curadoria do selo de artesão
+
+O Profile é a autoridade do selo de **artesão verificado**. Este selo não é o
+atributo `autentica` das peças (PI-174) e nenhuma decisão escreve no Catalog.
+
+- `GET /api/v1/artesao/selo`: `{ dados: { selo, solicitacao }, erro: null }`.
+  Sem histórico retorna `solicitacao: null`. A identidade vem exclusivamente do JWT
+  validado e da conta atual no banco; somente artesão consulta o próprio estado.
+- `POST /api/v1/artesao/selo`: `{ mensagem }`, texto opcional de até 1.000 caracteres,
+  sem tipos coercivos, nulos ou campos extras. Retorna 200 com o mesmo EstadoSelo.
+  Solicitação pendente ou selo já concedido gera `409 CONFLITO_ESTADO`.
+- `GET /api/v1/admin/curadoria`: lista somente pendentes, da mais antiga para a mais
+  recente, com os campos `id`, `artesaoSlug`, `artesao`, `atelie`, `mensagem`,
+  `situacao`, `solicitadoEm`, `motivo`, `decididoEm`, `territorio`, `tecnica`,
+  `imagem` e `pecasPublicadas` esperados pela interface.
+- `POST /api/v1/admin/curadoria/{id}/decisao`: `{ decisao: "aprovada" | "ajuste", motivo }`.
+  Ajuste exige motivo não vazio de até 1.000 caracteres. Aprovação aceita motivo
+  omitido ou vazio. Ambas retiram a solicitação da fila. Retorna 200 com a solicitação.
+
+As rotas administrativas reutilizam `AutorizarOperacaoAdministrativaUseCase`,
+inclusive papel atual no banco e restrição de troca obrigatória da senha. Ausência
+ou invalidade da sessão retorna 401; papel indevido retorna 403; ID ausente retorna
+404; JSON/UUID/campos inválidos retornam 400. Respostas mantêm `{ dados, erro }`,
+erros de campo usam `erro.campos` e rotas privadas usam `Cache-Control: no-store`.
+Mutações preservam a proteção de Origin existente. O Gateway converte o cookie em
+Bearer; chamadas diretas ao serviço usam Bearer, sem mudar o contrato JWT.
+
+A migration **V10** cria `solicitacoes_selo` no banco próprio, com FK do perfil,
+limites, estados e índices únicos para pendente/aprovada. Não altera migrations
+anteriores, nem campos culturais ou mídia. O selo público é derivado da existência
+de uma aprovação persistida; não há flag duplicada que possa divergir da decisão.
+A listagem pública consulta os IDs verificados em lote, e detalhe/próprio perfil
+consultam a mesma fonte. Campos privados da solicitação não são publicados.
+
+Regra de histórico adotada: cada reenvio após `ajuste` cria **novo UUID** e preserva
+a tentativa anterior e seu motivo. A tentativa atual é a mais recente. Uma decisão
+atrasada sobre o UUID anterior não pode decidir o novo pedido. A conta do artesão
+é bloqueada ao solicitar e a linha da solicitação é bloqueada ao decidir. Repetir
+mesma decisão/motivo normalizados retorna a resposta persistida, conservando data,
+autor e contagem conferida, mesmo se o Catalog estiver indisponível. Decisão ou
+motivo diferentes sobre pedido decidido retornam `409 CONFLITO_ESTADO`.
+
+`CATALOG_SERVICE_URL` aponta para a raiz do Catalog (padrão local
+`http://localhost:8081`; Compose usa `http://catalog-service:8081`). Fila e primeira
+decisão consultam **GET público `/api/v1/artesaos/{slug}/pecas`**, sem JWT para não
+incluir rascunhos do dono. A contagem usa peças publicadas/ativas do ateliê. A
+aprovação exige pelo menos uma, conforme critério já exibido em `/admin/criteria`.
+Não há cópia de peças nem leitura de banco alheio. Falha/contrato inválido do Catalog
+retorna `503 CATALOGO_INDISPONIVEL`, sem conceder selo ou fabricar contagem; nesse
+caso a primeira decisão deve ser repetida quando o Catalog voltar.
+
+Frontend: mantém telas e services existentes. Erro ao consultar o selo mostra erro
+e oculta o formulário; uma falha não vira "sem solicitação". A fila continua
+utilizável quando `/coletivos` falha, exibindo aviso para conferir o vínculo. O
+backend de coletivos continua no PI-183. Critérios estáticos não foram alterados.
+
+Testes: `CuradoriaHttpTest` usa HTTP real, PostgreSQL Testcontainers e um servidor
+HTTP de contrato do Catalog para falhas/contagem. `scripts/test-pi177-runtime.py`
+usa imagens reais de Catalog/Gateway/Frontend, Profile empacotado e dois Postgres
+descartáveis, incluindo reinício dos bancos/serviços e comparação integral da peça.
+Com `--browser`, executa solicitação → ajuste → reenvio → aprovação no Chrome,
+valida cookie HttpOnly e a falha SSR por injeção controlada somente no banco de
+teste. Todos os recursos de runtime têm nomes aleatórios; volumes existentes não
+são acessados nem apagados.
+
+```powershell
+# JDK 25 e Docker disponíveis
+.\mvnw.cmd verify
+Copy-Item target/profile-service-0.0.1-SNAPSHOT.jar target/pi177-profile.jar
+# Construir previamente as imagens locais de Frontend, Gateway e Catalog.
+python scripts/test-pi177-runtime.py target/pi177-profile.jar --browser
+```
+
+Limitação da referência: Confluence retornou 403 e a Fake API não está presente
+nesta cópia. Contratos foram conferidos com PI-177/28/20/169/171/172/174/183/249,
+`Frontend/docs/api.md`, tipos/services e APIs reais existentes.
+
 ## Stack inicial
 
 - Spring MVC, Spring Data JPA e PostgreSQL

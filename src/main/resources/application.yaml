@@ -39,6 +39,8 @@ management:
       exposure:
         include: health,info
 balaio:
+  catalog:
+    url: ${CATALOG_SERVICE_URL:http://localhost:8081}
   auth:
     jwt:
       private-key-location: ${JWT_PRIVATE_KEY_LOCATION:}
