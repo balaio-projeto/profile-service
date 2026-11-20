@@ -2,6 +2,45 @@
 
 Contas, perfis de compradores e artesãos, selo e curadoria. O serviço é independente, usa Java 25 e Spring Boot 4.1.1 e recebe requisições externas por meio do api-gateway.
 
+## PI-209 — conta e configurações privadas
+
+`PATCH /api/v1/usuario` e o alias `PATCH /api/v1/conta/{id}` editam somente
+`nome` e `email` da própria conta autenticada. Campos omitidos são preservados;
+campos desconhecidos, valores nulos e tipos incorretos são recusados. O nome
+segue o limite existente de 240 caracteres; o e-mail é normalizado e permanece
+único, inclusive sob concorrência. O alias não permite editar outro UUID.
+Respostas usam o usuário público existente e `Cache-Control: no-store`.
+E-mail duplicado retorna 409/EMAIL_EM_USO; entrada inválida retorna
+400/REQUISICAO_INVALIDA com `erro.campos`; autenticação/autorização usam 401/403.
+
+`POST /api/v1/auth/alterar-senha` continua sendo a única implementação da troca
+de senha, com `senhaAtual` e `novaSenha`; o frontend passou a chamar esse contrato.
+
+`GET/PATCH /api/v1/artesaos/{slug}/configuracoes` exigem Bearer JWT válido e
+papel atual de artesão proprietário. Não há acesso público ou exceção de admin
+para a chave Pix. Os campos são `cepOrigem` (8 dígitos, com hífen opcional,
+normalizado para 00000-000), `prazoPadraoDias` (inteiro de 1 a 120),
+`aceitaEncomendas` e `encomendasPausadas` (booleanos) e `chavePix` (texto não vazio,
+sem caracteres de controle, com espaços externos removidos). Não há processamento
+ou validação bancária da chave. PATCH preserva campos ausentes e serializa
+atualizações concorrentes do mesmo ateliê. A V9 cria somente
+`configuracoes_atelie`, sem modificar o perfil cultural ou as migrations antigas.
+
+Um ateliê ainda não configurado retorna CEP/Pix vazios, prazo mínimo de 1 dia e
+ambas as opções desmarcadas; GET não grava dados. Esses valores iniciais permitem
+preencher o formulário, sem criar uma nova regra de encomendas. A chave só aparece
+na resposta privada das configurações, nunca no perfil público ou no usuário.
+Todas as respostas e erros desse recurso têm `Cache-Control: no-store` e erros
+internos são sanitizados. Mutações diretas também verificam Origin.
+
+O carregamento SSR de `/dashboard/settings` encaminha explicitamente o token
+obtido por `exigirArtesao()` usando `comToken`, sem mudar o cookie HttpOnly ou
+enviar o JWT como propriedade de componentes cliente. Via navegador, o proxy
+existente converte o cookie em Bearer. As configurações são persistidas no
+PostgreSQL do Profile, inclusive após reinício; GET não depende de memória local.
+
+Testes adicionais: `PreferenciasHttpTest` (PostgreSQL descartável e HTTP real).
+
 ## Stack inicial
 
 - Spring MVC, Spring Data JPA e PostgreSQL
