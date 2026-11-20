@@ -22,6 +22,12 @@ spring:
     properties:
       mail.smtp.auth: ${PROFILE_SMTP_AUTH:false}
       mail.smtp.starttls.enable: ${PROFILE_SMTP_STARTTLS:false}
+      mail.smtp.starttls.required: ${PROFILE_SMTP_STARTTLS:false}
+      mail.smtp.ssl.checkserveridentity: true
+      mail.debug: false
+      mail.smtp.connectiontimeout: ${PROFILE_SMTP_CONNECTION_TIMEOUT:5000}
+      mail.smtp.timeout: ${PROFILE_SMTP_READ_TIMEOUT:10000}
+      mail.smtp.writetimeout: ${PROFILE_SMTP_WRITE_TIMEOUT:10000}
   jpa:
     open-in-view: false
     hibernate:

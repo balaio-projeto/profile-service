@@ -284,6 +284,102 @@ Configure externamente `PROFILE_FRONTEND_BASE_URL`, `PROFILE_RECOVERY_TOKEN_TTL`
 **JWT emitidos antes da redefinição permanecem válidos até expirar.** PI-168 usa JWT RS256 sem lista de revogação nem tabela de sessões; esta integração não cria mecanismo paralelo. O login com a senha antiga falha, e o login com a nova funciona. A revogação imediata de JWT requer decisão de segurança e alteração coordenada dos validadores/consumidores. O logout continua apenas limpando o cookie no navegador, conforme o contrato existente.
 
 Os testes US34 reutilizam o PostgreSQL 18 descartável de `PostgreSQLTestConfiguration`. Execute `.\mvnw.cmd -B -ntp clean verify` com JDK 25 e Docker ativo. O envio externo deve ser validado com uma caixa SMTP controlada e a URL pública do ambiente; os testes automatizados não precisam de credenciais reais.
+
+### PI-170 — SMTP por ambiente e validação ponta a ponta
+
+Os endpoints, o hash/expiração/uso único dos tokens e o envio após commit foram
+preservados. O retorno **201** confirma que o pedido foi recebido; ele não promete
+entrega do e-mail e continua indistinguível para conta existente ou ausente.
+Falhas do SMTP são registradas sem token, link, senha ou destinatário. O DTO de
+redefinição também oculta token e senha em sua representação de log.
+
+O Gateway permite o **POST exato `/api/v1/auth/redefinicao`** sem sessão, assim
+como a solicitação de recuperação. Essa omissão na borda impedia o uso do link
+recebido pelo navegador. O token é validado pelo Profile; Origin/cookie continuam
+protegidos e `/auth/alterar-senha` permanece autenticado. Outros métodos/caminhos
+não recebem essa permissão.
+
+O provedor é selecionado pelas variáveis existentes. Para **Gmail**, configure
+somente no `.env` local ignorado ou no secret store do ambiente:
+
+```dotenv
+PROFILE_SMTP_HOST=smtp.gmail.com
+PROFILE_SMTP_PORT=587
+PROFILE_SMTP_USERNAME=<conta Gmail autorizada>
+PROFILE_SMTP_PASSWORD=<senha de app>
+PROFILE_SMTP_AUTH=true
+PROFILE_SMTP_STARTTLS=true
+PROFILE_MAIL_FROM=<remetente autorizado>
+PROFILE_FRONTEND_BASE_URL=https://<frontend acessivel da homologacao>
+```
+
+O Google exige uma [senha de app](https://support.google.com/accounts/answer/185833?hl=pt-BR)
+para este fluxo SMTP sem OAuth, com verificação em duas etapas habilitada. Não use
+a senha normal da conta. Host, porta e STARTTLS seguem a
+[configuração SMTP oficial](https://support.google.com/mail/answer/7104828?hl=pt-BR).
+Nenhuma credencial pessoal deve ser escrita em exemplos, testes ou relatórios.
+
+STARTTLS habilitado também é obrigatório, e a identidade/cadeia do certificado
+continuam validadas. SMTP autenticado sem TLS, credenciais ausentes, trust que
+contorne o certificado, debug SMTP ou timeouts ilimitados impedem a inicialização.
+Os limites padrão são conexão **5 s**, leitura **10 s**, escrita **10 s**; podem ser
+ajustados por `PROFILE_SMTP_CONNECTION_TIMEOUT`, `PROFILE_SMTP_READ_TIMEOUT` e
+`PROFILE_SMTP_WRITE_TIMEOUT`, em milissegundos e com valores positivos.
+
+SMTP local continua disponível: loopback sem autenticação pode usar porta 1025;
+nomes de serviço Docker, como `mailpit`, sem TLS só são aceitos no perfil `local`.
+Nesse caso use `PROFILE_SMTP_AUTH=false` e `PROFILE_SMTP_STARTTLS=false`.
+`localhost` dentro do container aponta para o próprio container, não para o host.
+Os testes abaixo iniciam seu próprio Mailpit, sem relay nem entrega externa.
+
+`PROFILE_FRONTEND_BASE_URL` deve ser uma URL absoluta HTTPS da aplicação, sem
+usuário/senha, query ou fragmento; HTTP é aceito somente para loopback local.
+Exemplo local: `http://localhost:4321`. Um prefixo válido, como
+`https://site.example/market/`, é preservado e gera `/market/login/reset?token=...`.
+A rota de redefinição continua sendo **`/login/reset`**; o token não entra em logs.
+Não use localhost como URL de homologação, pois o destinatário abriria a própria
+máquina. Depois de configurar um SMTP externo válido, recrie somente o Profile
+para atualizar suas variáveis, sem remover volumes:
+
+```powershell
+docker compose up -d --no-deps --build --wait profile-service
+```
+
+A tela de redefinição reutiliza a validação compartilhada: mínimo **12 codepoints**,
+máximo **72 bytes UTF-8**, sem controles ou UTF-16 inválido, sem trim da senha.
+36 letras `é` ocupam 72 bytes; 18 emojis de quatro bytes também. Os testes cobrem
+esses limites e recusam 37 letras `é`, 19 emojis e 11 emojis (apesar de 22 unidades
+UTF-16). Essa regra mantém a política existente do servidor.
+
+`RecoveryMailpitHttpTest` usa Mailpit **v1.34.0**, PostgreSQL descartável e HTTP
+real, sem mock de `JavaMailSender`: recebe o e-mail por SMTP, extrai seu link,
+redefine, autentica com a nova senha e recusa senha anterior/token usado/expirado.
+Os testes unitários e de concorrência anteriores permanecem. Para executar:
+
+```powershell
+.\mvnw.cmd -Dtest=RecoveryConfigurationTest,RecoveryMailpitHttpTest,RecoveryIntegrationTest test
+```
+
+`scripts/test-pi170-runtime.py` testa as imagens reais do Profile, Gateway e
+Frontend com Mailpit/PostgreSQL novos. Exercita Chrome desktop/mobile, validação
+Unicode antes do POST, resposta uniforme, link recebido por SMTP, senha nova,
+reutilização, expiração, cookie HttpOnly e ausência de rolagem horizontal. Não lê
+o `.env` real, não depende do Gmail e remove somente os recursos aleatórios que
+criou. Pré-requisitos: Docker, PowerShell 7, Chrome e dependências do frontend.
+
+```powershell
+# Em platform, preparar as imagens locais (não altera bancos).
+docker compose build profile-service api-gateway frontend
+# Em profile-service:
+python scripts/test-pi170-runtime.py
+```
+
+**Validação externa:** os testes com Mailpit não comprovam chegada no Gmail.
+Com credenciais e URL pública disponíveis, validar conexão/autenticação, solicitar
+recuperação para uma conta controlada, confirmar recebimento na caixa de teste,
+abrir o link e completar redefinição/login. Se faltar configuração, essa etapa
+permanece pendente; nenhum envio externo faz parte dos testes automatizados.
+
 ## Midias do perfil — PI-214, Etapa 3
 
 Branch baseada em `origin/PI-171` no commit `1e5beb3`.
