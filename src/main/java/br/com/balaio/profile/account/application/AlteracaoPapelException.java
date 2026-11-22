@@ -5,6 +5,7 @@ public class AlteracaoPapelException extends RuntimeException {
         COMANDO_INVALIDO("Dados da alteração de papel inválidos."),
         CONTA_ALVO_INDISPONIVEL("Conta alvo indisponível."),
         CONFLITO_ATUALIZACAO("A conta foi alterada durante a operação. Tente novamente."),
+        TRANSICAO_NAO_PERMITIDA("Transição de papel não permitida para esta conta."),
         FALHA_ALTERACAO("Não foi possível alterar o papel da conta.");
 
         private final String mensagem;

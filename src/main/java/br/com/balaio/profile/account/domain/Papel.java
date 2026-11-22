@@ -3,7 +3,8 @@ package br.com.balaio.profile.account.domain;
 public enum Papel {
     COMPRADOR("comprador"),
     ARTESAO("artesao"),
-    ADMIN("admin");
+    ADMIN("admin"),
+    ORGANIZADOR("organizador");
 
     private final String codigo;
 

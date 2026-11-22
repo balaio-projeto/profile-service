@@ -11,9 +11,11 @@ class PapelTest {
         assertThat(Papel.fromCodigo("comprador")).isEqualTo(Papel.COMPRADOR);
         assertThat(Papel.fromCodigo("artesao")).isEqualTo(Papel.ARTESAO);
         assertThat(Papel.fromCodigo("admin")).isEqualTo(Papel.ADMIN);
+        assertThat(Papel.fromCodigo("organizador")).isEqualTo(Papel.ORGANIZADOR);
         assertThat(Papel.COMPRADOR.codigo()).isEqualTo("comprador");
         assertThat(Papel.ARTESAO.codigo()).isEqualTo("artesao");
         assertThat(Papel.ADMIN.codigo()).isEqualTo("admin");
+        assertThat(Papel.ORGANIZADOR.codigo()).isEqualTo("organizador");
     }
 
     @Test
