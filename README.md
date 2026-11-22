@@ -259,6 +259,23 @@ A trava do singleton permanece até commit ou rollback. Assim, a segunda operaç
 
 O modelo atual não possui indicador de ativação nem operações de remoção/desativação. Portanto, contas existentes com papel `admin` compõem a contagem de administradores ativos nesta etapa. Pendência de troca restringe ações administrativas, mas não equivale a desativação. Não foram criadas operações de ciclo de vida; quando existirem, deverão reutilizar a trava e a verificação do último administrador antes de remover sua condição ativa. Curadoria de selo pertence à PI-177 e não integra esta entrega.
 
+## Organizador de eventos — PI-210
+
+O papel `organizador` é persistido (`V13__organizador_papel.sql`, migration aditiva que amplia `ck_contas_papel`) e emitido na claim `papel` do JWT. O cadastro público continua aceitando somente `comprador` e `artesao`; `papel` ou `perfil` com `organizador` é recusado sem criar conta. Na resposta de usuário, `perfil` aparece apenas para comprador e artesão.
+
+Provisionamento (desenvolvimento e homologação): `PATCH /api/v1/admin/contas/{id}/papel` com corpo `{"papel":"organizador"}` para atribuir ou `{"papel":"comprador"}` para remover. O endpoint é restrito a administrador autenticado (`ValidarSessaoAdapter`, papel e troca de senha conferidos no banco). Aceita apenas as transições `comprador → organizador` e `organizador → comprador`; repetir a operação é idempotente. Não é uma API genérica de promoção a `admin`.
+
+| Situação | Status | `erro.codigo` |
+| --- | --- | --- |
+| Sem JWT válido | 401 | `NAO_AUTENTICADO` |
+| Chamador não administrador ou troca de senha pendente | 403 | `SEM_PERMISSAO` |
+| Valor fora de `organizador`/`comprador`, JSON inválido | 400 | `REQUISICAO_INVALIDA` |
+| Conta inexistente | 404 | `CONTA_NAO_ENCONTRADA` |
+| Transição não permitida (ex.: artesão → organizador) | 409 | `TRANSICAO_PAPEL_INVALIDA` |
+| Sucesso | 204 sem corpo e sem token novo | — |
+
+Procedimento: criar a conta como comprador pelo cadastro público; autenticar um administrador; chamar o `PATCH` com o `id` da conta; pedir à conta alvo que encerre a sessão e faça novo login. O JWT anterior mantém a claim antiga até `exp`, com janela de até 3600 segundos; não há revogação imediata neste contrato. Para remover o papel, use `{"papel":"comprador"}` e repita o mesmo procedimento de novo login.
+
 ## Testes e escopo
 
 Execute `.\mvnw.cmd -B -ntp clean verify` com JDK 25 e Docker ativo. A compilação limpa também remove classes e migrations antigas de `target/` depois de desfazer alterações. Os testes usam PostgreSQL 18 descartável via Testcontainers, sem usar o banco do projeto nem ler credenciais locais. Confira `java -version` e `JAVA_HOME` no terminal usado pelo Maven; a versão declarada no POM não seleciona automaticamente um JDK instalado.
