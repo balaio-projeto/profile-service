@@ -73,6 +73,19 @@ class PerfilArtesaoServiceTest {
 
         assertThat(resposta.id()).isEqualTo(conta.id());
         assertThat(resposta.slug()).isEqualTo("artesao-" + conta.id());
+        assertThat(resposta.obrasComercializadas()).isNull();
+        assertThat(resposta.avaliacaoMedia()).isNull();
+    }
+
+    @Test
+    void listagemPublicaSemPerfisRetornaListaVazia() {
+        assertThat(service.listar()).isEmpty();
+    }
+
+    @Test
+    void artesaoInexistenteFalhaComErroDeRecursoNaoEncontrado() {
+        assertThatThrownBy(() -> service.consultar("artesao-inexistente"))
+                .isInstanceOf(PerfilNaoEncontradoException.class);
     }
 
     private Conta conta(Papel papel) {

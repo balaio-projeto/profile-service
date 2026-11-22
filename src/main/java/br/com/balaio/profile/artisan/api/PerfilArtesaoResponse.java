@@ -13,8 +13,8 @@ public record PerfilArtesaoResponse(
         String territorio,
         String tecnica,
         String imagem,
-        long obrasComercializadas,
-        double avaliacaoMedia,
+        Long obrasComercializadas,
+        Double avaliacaoMedia,
         boolean selo
 ) {
     public static PerfilArtesaoResponse de(PerfilArtesao perfil, boolean selo) {
@@ -27,8 +27,8 @@ public record PerfilArtesaoResponse(
                 perfil.territorio(),
                 perfil.tecnica(),
                 perfil.imagem(),
-                0L,
-                0.0,
+                null,
+                null,
                 selo
         );
     }
