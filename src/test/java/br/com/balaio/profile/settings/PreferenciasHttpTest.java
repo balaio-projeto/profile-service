@@ -28,20 +28,60 @@ class PreferenciasHttpTest {
     static final JsonMapper JSON=JsonMapper.builder().build();
     static final String SENHA="SenhaDeTeste123!";
     static final String HASH="{bcrypt}"+new BCryptPasswordEncoder(12).encode(SENHA);
+    @Test void enderecosSaoPrivadosEPrincipalSegueExclusao() throws Exception {
+        String corpo="{\"apelido\":\"Casa\",\"rua\":\"Rua A, 1\",\"bairro\":\"Centro, Recife, PE\",\"cep\":\"50000-000\"}";
+        var criado=enviar("POST","/usuario/enderecos",corpo,comprador);
+        assertStatus(criado,200);
+        assertStatus(enviar("POST","/usuario/enderecos","{\"apelido\":\"Sem cidade\",\"rua\":\"Rua B, 2\",\"bairro\":\"Centro\",\"cep\":\"50000-000\"}",comprador),400);
+        String id=JSON.readTree(criado.body()).get("dados").get("id").asText();
+        assertThat(criado.body()).contains("\"principal\":true");
+        assertThat(enviar("GET","/usuario/enderecos",null,comprador).body()).contains(id);
+        assertThat(enviar("GET","/usuario",null,comprador).body()).doesNotContain("enderecos");
+        assertStatus(enviar("GET","/usuario/enderecos/"+id,null,outro),403);
+        assertStatus(enviar("GET","/usuario/enderecos/"+id,null,null),401);
+        assertStatus(enviar("DELETE","/usuario/enderecos/"+id,null,comprador),200);
+        assertThat(enviar("GET","/usuario/enderecos",null,comprador).body()).contains("\"dados\":[]");
+    }
     @LocalServerPort int port;
     @Autowired JdbcTemplate jdbc;
     @MockitoBean(enforceOverride=true) InicializarAdministradorUseCase admin;
-    UUID dono, outro, comprador, perfil;
+    UUID dono, outro, comprador, comprador2, perfil;
     String slug;
 
     @BeforeEach void preparar() {
-        dono=criar("artesao"); outro=criar("artesao"); comprador=criar("comprador");
+        dono=criar("artesao"); outro=criar("artesao"); comprador=criar("comprador"); comprador2=criar("comprador");
         perfil=UUID.randomUUID(); slug="artesao-"+dono;
         jdbc.update("INSERT INTO perfis_artesao(id,conta_id,slug,nome,atelie,historia,territorio,tecnica) VALUES (?,?,?,?,?,?,?,?)",
                 perfil,dono,slug,"Nome artístico","Ateliê cultural","História preservada","Pajeú","Xilogravura");
     }
+    @Test void coletivoSemMembrosNemPecasRetornaContratoPublico() throws Exception {
+        assertThat(enviar("GET","/coletivos",null,null).body()).contains("\"dados\":[]");
+        UUID id=UUID.randomUUID();
+        String identificador="coletivo-"+id.toString().substring(0,8);
+        jdbc.update("INSERT INTO coletivos(id,slug,nome,territorio,fundado,historia) VALUES (?,?,?,?,?,?)",
+                id,identificador,"Coletivo de teste","Pajeú","2024","História");
+        try {
+            var resposta=enviar("GET","/coletivos/"+identificador,null,null);
+            assertStatus(resposta,200);
+            assertThat(resposta.body()).contains("\"membros\":[]","\"pecas\":[]","Coletivo de teste");
+        } finally {
+            jdbc.update("DELETE FROM coletivos WHERE id=?",id);
+        }
+    }
     @AfterEach void limpar() {
-        jdbc.update("DELETE FROM contas WHERE id IN (?,?,?)",dono,outro,comprador);
+        jdbc.update("DELETE FROM contas WHERE id IN (?,?,?,?)",dono,outro,comprador,comprador2);
+    }
+    @Test void compradorNaoLeAlteraNemRemoveEnderecoDeOutroComprador() throws Exception {
+        var criado=enviar("POST","/usuario/enderecos","{\"apelido\":\"Casa\",\"rua\":\"Rua A, 1\",\"bairro\":\"Centro, Recife, PE\",\"cep\":\"50000-000\"}",comprador);
+        assertStatus(criado,200);
+        String id=JSON.readTree(criado.body()).get("dados").get("id").asText();
+        assertStatus(enviar("GET","/usuario/enderecos/"+id,null,comprador2),404);
+        assertStatus(enviar("PATCH","/usuario/enderecos/"+id,"{\"rua\":\"Invadida, 9\"}",comprador2),404);
+        assertStatus(enviar("DELETE","/usuario/enderecos/"+id,null,comprador2),404);
+        assertThat(enviar("GET","/usuario/enderecos",null,comprador2).body()).doesNotContain(id,"Rua A");
+        var atual=enviar("GET","/usuario/enderecos/"+id,null,comprador);
+        assertStatus(atual,200);
+        assertThat(atual.body()).contains("Rua A, 1").doesNotContain("Invadida");
     }
     @Test void contaParcialPersisteSemAlterarPerfilCredenciaisOuPapel() throws Exception {
         assertStatus(enviar("PATCH","/conta/"+dono,"{\"nome\":\" Novo Nome \"}",dono),200);
@@ -149,7 +189,7 @@ class PreferenciasHttpTest {
     private URI uri(String path) { return URI.create("http://localhost:"+port+"/api/v1"+path); }
     private String token(UUID id) {
         var claims=SessaoJwtTestFixtures.claims(id,Instant.now());
-        claims.put("papel",id.equals(comprador)?"comprador":"artesao");
+        claims.put("papel",id.equals(comprador)||id.equals(comprador2)?"comprador":"artesao");
         return SessaoJwtTestFixtures.token(claims);
     }
     private HttpResponse<String> enviar(String method,String path,String body,UUID id) throws Exception {

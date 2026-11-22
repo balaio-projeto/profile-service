@@ -31,7 +31,7 @@ class MediaMigrationUpgradeTest {
                 var atual = Flyway.configure().dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
                         .locations("classpath:db/migration").load();
                 atual.migrate();
-                assertThat(atual.info().applied()).hasSize(9);
+                assertThat(atual.info().applied()).hasSize(11);
                 for (int i = 0; i < historico.length; i++) {
                     assertThat(atual.info().applied()[i].getChecksum()).isEqualTo(historico[i].getChecksum());
                 }
