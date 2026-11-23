@@ -203,7 +203,7 @@ O Compose local monta os volumes de chave automaticamente; fora do perfil `local
 
 ### Origin e limites da integração
 
-Cadastro, login/alias e logout verificam `Origin` antes dos efeitos. Quando presente, ele deve corresponder exatamente à allowlist; `null`, múltiplos valores e origem externa retornam **403 / SEM_PERMISSAO**. Se houver cookie `balaio_sessao`, a ausência de Origin também é rejeitada. Requisições sem cookie e sem Origin são permitidas para clientes de API; adicionar Bearer não dispensa a regra quando há cookie. Para repetir logout com cookie no Bruno, enviar Origin permitido ou remover o cookie do cliente.
+Cadastro, login/alias e logout verificam `Origin` antes dos efeitos. Quando presente, ele deve corresponder exatamente à allowlist; `null`, múltiplos valores e origem externa retornam **403 / SEM_PERMISSAO**. Se houver cookie `balaio_sessao`, a ausência de Origin também é rejeitada. Requisições sem cookie e sem Origin são permitidas para clientes de API; adicionar Bearer não dispensa a regra quando há cookie. Para repetir logout com cookie no REST Client (`docs/exemplos-autenticacao.http`), enviar Origin permitido ou remover o cookie do cliente.
 
 Não há confiança em `Host`, `Forwarded` ou `X-Forwarded-*` para desligar Secure; `server.forward-headers-strategy=none`. HTTPS público deve usar `AUTH_COOKIE_SECURE=true`, inclusive quando o TLS terminar no proxy. O CORS do gateway e a propagação de credenciais são trabalho da etapa 4; esta etapa não adiciona CORS permissivo.
 
@@ -218,6 +218,60 @@ Os sete claims são obrigatórios: `sub` UUID canônico, `papel` conhecido no do
 Após a validação, o serviço consulta `ContasPort.buscarPorId` e retorna **200** com o mesmo `{dados:usuarioPublico,erro:null}` de login, usando nome, e-mail e papel **atuais do PostgreSQL**, mesmo se o papel do JWT tiver mudado desde a emissão. `perfil` continua omitido para administrador; senha, hash, JWT e indicador de troca não são expostos. Token ausente/inválido ou conta inexistente produzem o mesmo **401 / NAO_AUTENTICADO**, com envelope sanitizado. Sucesso e 401 incluem `Cache-Control: no-store` e não emitem cookie.
 
 Essa validação fica restrita à consulta de usuário. Regras de autorização dos demais recursos e cadeias globais de segurança dos serviços permanecem nas etapas próprias.
+
+## Contrato JWT pelo gateway — exemplos executáveis (PI-261)
+
+Os mesmos exemplos existem em formato REST Client em [`docs/exemplos-autenticacao.http`](docs/exemplos-autenticacao.http) (extensão REST Client do VS Code ou `httpyac`). O cliente guarda o cookie `balaio_sessao` entre as requisições; para os exemplos com Bearer, copie o valor do cookie da resposta de login para a variável `@jwt`. Nenhum segredo real é usado: a conta é criada na hora com e-mail `@teste.local`.
+
+Resumo do contrato validado pelos exemplos:
+
+- Cadastro (`201`) e login (`200`) devolvem `{dados:usuarioPublico,erro:null}` e `Set-Cookie: balaio_sessao=<JWT>; Path=/api/v1; Max-Age=3600; HttpOnly; SameSite=Lax` (`Secure` quando `AUTH_COOKIE_SECURE=true`; desligado apenas no perfil `local` em HTTP).
+- O JWT é RS256 com `sub`, `papel`, `iss`, `aud`, `iat`, `exp` e `jti`, válido por 60 minutos, sem refresh token. Gateway e serviços recebem só a chave pública.
+- O gateway aceita o cookie do navegador ou `Authorization: Bearer <JWT>`, valida o token e encaminha Bearer ao serviço dono, que valida de novo e decide o papel e a posse do recurso.
+- Métodos que alteram dados com cookie exigem `Origin` da allowlist (`AUTH_ALLOWED_ORIGINS`); origem externa recebe `403 / SEM_PERMISSAO`.
+- `POST /auth/logout` expira o cookie (`Max-Age=0`). **Um JWT copiado antes do logout continua válido até `exp`**; não há revogação imediata nesta release.
+- Sem credencial, token adulterado, expirado ou com audiência errada: `401 / NAO_AUTENTICADO`. Papel sem permissão: `403 / SEM_PERMISSAO` no gateway ou no serviço.
+
+Roteiro com `curl` contra a pilha local (`http://localhost:8080`), executado em 22/11/2026:
+
+```bash
+G=http://localhost:8080/api/v1
+O="Origin: http://localhost:4321"
+EMAIL="exemplo-$(date +%s)@teste.local"
+SENHA='SenhaDeTeste123!'
+
+curl -i -c sessao.jar -H "$O" -H 'Content-Type: application/json' -d "{\"nome\":\"Pessoa Exemplo\",\"email\":\"$EMAIL\",\"senha\":\"$SENHA\",\"perfil\":\"comprador\"}" $G/auth/cadastro
+curl -i -c sessao.jar -H "$O" -H 'Content-Type: application/json' -d "{\"email\":\"$EMAIL\",\"senha\":\"$SENHA\"}" $G/auth/login
+JWT=$(awk '$6 == "balaio_sessao" {print $7}' sessao.jar)
+
+curl -i -b sessao.jar $G/usuario
+curl -i -H "Authorization: Bearer $JWT" $G/usuario
+curl -i $G/usuario
+PAYLOAD=$(cut -d. -f2 <<<"$JWT" | tr '_-' '/+'); while [ $(( ${#PAYLOAD} % 4 )) -ne 0 ]; do PAYLOAD="$PAYLOAD="; done
+FORJADO=$(base64 -d <<<"$PAYLOAD" | sed 's/"papel":"comprador"/"papel":"admin"/' | base64 -w0 | tr '/+' '_-' | tr -d '=')
+curl -i -H "Authorization: Bearer $(cut -d. -f1 <<<"$JWT").$FORJADO.$(cut -d. -f3 <<<"$JWT")" $G/admin/curadoria
+curl -i -H "Authorization: Bearer $JWT" $G/admin/curadoria
+curl -i -b sessao.jar -X PATCH -H 'Origin: https://origem-externa.example' -H 'Content-Type: application/json' -d '{"nome":"Nome Alterado"}' $G/usuario
+curl -i -b sessao.jar -c sessao.jar -X POST -H "$O" $G/auth/logout
+curl -i -b sessao.jar $G/usuario
+curl -i -H "Authorization: Bearer $JWT" $G/usuario
+```
+
+| Passo | Resultado obtido |
+|---|---|
+| Cadastro de comprador | `201`, envelope com `papel: comprador` e `Set-Cookie balaio_sessao` |
+| Login | `200` e novo `Set-Cookie balaio_sessao`; senha errada dá `401 / CREDENCIAIS_INVALIDAS` |
+| `GET /usuario` com cookie | `200` com o usuário público |
+| `GET /usuario` com `Authorization: Bearer` | `200` com o mesmo usuário |
+| `GET /usuario` sem credencial | `401 / NAO_AUTENTICADO` |
+| Token com payload trocado para `papel: admin` e assinatura original em `GET /admin/curadoria` | `401 / NAO_AUTENTICADO` |
+| Comprador em `GET /admin/curadoria` | `403 / SEM_PERMISSAO` (gateway) |
+| `PATCH /usuario` por cookie com Origin externo | `403 / SEM_PERMISSAO` |
+| Logout | `200`, `{encerrada:true}` e `Set-Cookie balaio_sessao=; Max-Age=0` |
+| `GET /usuario` com o cookie após logout | `401 / NAO_AUTENTICADO` |
+| `GET /usuario` com Bearer copiado antes do logout | `200` até `exp` (limitação documentada) |
+
+O serviço dono também recusa papel inadequado quando o gateway deixa passar uma rota autenticada genérica: artesão com Bearer válido em `GET /usuario/enderecos` recebe `403 / SEM_PERMISSAO` do profile-service. Token expirado e audiência errada são cobertos pelos testes automatizados do gateway e do profile-service, pois não dá para produzi-los com a chave local sem esperar 60 minutos.
 
 ## Contas e primeiro administrador
 
