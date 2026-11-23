@@ -38,6 +38,7 @@ class CuradoriaHttpTest {
     static volatile String corpoCatalogo;
     static volatile String bearerCatalogo;
     static volatile long atrasoCorpo;
+    static final List<String> metodosCatalogo=Collections.synchronizedList(new ArrayList<>());
     static final HttpServer CATALOGO=iniciarCatalogo();
     @LocalServerPort int port;
     @Autowired JdbcTemplate jdbc;
@@ -51,6 +52,7 @@ class CuradoriaHttpTest {
             var servidor=HttpServer.create(new InetSocketAddress("127.0.0.1",0),0);
             servidor.createContext("/api/v1/artesaos/",exchange->{
                 chamadas.incrementAndGet();
+                metodosCatalogo.add(exchange.getRequestMethod());
                 bearerCatalogo=exchange.getRequestHeaders().getFirst("Authorization");
                 String artesao=exchange.getRequestURI().getPath().split("/")[4];
                 var pecas=new ArrayList<Map<String,Object>>();
@@ -78,6 +80,7 @@ class CuradoriaHttpTest {
     @AfterAll static void pararCatalogo(){CATALOGO.stop(0);}
     @BeforeEach void preparar() {
         publicadas.set(1); chamadas.set(0); statusCatalogo=200; corpoCatalogo=null; bearerCatalogo=null; atrasoCorpo=0;
+        metodosCatalogo.clear();
         dono=conta("artesao"); outro=conta("artesao"); comprador=conta("comprador"); admin=conta("admin"); admin2=conta("admin");
         perfil=UUID.randomUUID(); slug="artesao-"+dono;
         jdbc.update("INSERT INTO perfis_artesao(id,conta_id,slug,nome,atelie,historia,territorio,tecnica,imagem) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -117,6 +120,18 @@ class CuradoriaHttpTest {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM solicitacoes_selo WHERE perfil_id=?",Integer.class,perfil)).isEqualTo(2);
         assertThat(jdbc.queryForObject("SELECT motivo FROM solicitacoes_selo WHERE id=?",String.class,UUID.fromString(id))).isEqualTo("Melhore as fotos");
         enviar("POST","/artesao/selo",Map.of("mensagem","Duplicada após selo"),dono,409);
+    }
+    /** TC12 (TS04): selo aprovado e ajuste com motivo não publicam, ocultam nem alteram peças no catálogo. */
+    @Test void decisoesDeSeloNaoEscrevemNoCatalogoNemMudamPecas() throws Exception {
+        String ajuste=solicitar(dono,"Pedido com peça publicada").get("id").asText();
+        decidir(ajuste,"ajuste","Melhore as fotos",admin,200);
+        String aprovado=solicitar(dono,"Fotos corrigidas").get("id").asText();
+        decidir(aprovado,"aprovada","",admin,200);
+        var fila=dados(enviar("GET","/admin/curadoria",null,admin,200));
+        assertThat(fila.size()).isZero();
+        assertThat(metodosCatalogo).isNotEmpty().allMatch("GET"::equals);
+        assertThat(publicadas.get()).isEqualTo(1);
+        assertThat(dados(enviar("GET","/artesao/selo",null,dono,200)).get("selo").asBoolean()).isTrue();
     }
     @Test void repeticaoPreservaDataAutorEContagemMesmoSeCatalogoCair() throws Exception {
         String id=solicitar(dono,"").get("id").asText();
