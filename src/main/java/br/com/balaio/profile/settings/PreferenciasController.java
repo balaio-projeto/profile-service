@@ -3,6 +3,7 @@ package br.com.balaio.profile.settings;
 import br.com.balaio.profile.account.api.CadastroPublicoResposta;
 import br.com.balaio.profile.account.api.UsuarioPublicoResposta;
 import br.com.balaio.profile.account.application.IdentidadeAutenticada;
+import br.com.balaio.profile.account.imagem.ImagemContaService;
 import br.com.balaio.profile.account.security.ValidarSessaoAdapter;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Collections;
@@ -17,13 +18,16 @@ public class PreferenciasController {
     private final ValidarSessaoAdapter sessoes;
     private final EdicaoContaService contas;
     private final ConfiguracoesAtelieService configuracoes;
-    public PreferenciasController(ValidarSessaoAdapter sessoes, EdicaoContaService contas, ConfiguracoesAtelieService configuracoes) {
-        this.sessoes = sessoes; this.contas = contas; this.configuracoes = configuracoes;
+    private final ImagemContaService imagens;
+    public PreferenciasController(ValidarSessaoAdapter sessoes, EdicaoContaService contas, ConfiguracoesAtelieService configuracoes,
+            ImagemContaService imagens) {
+        this.sessoes = sessoes; this.contas = contas; this.configuracoes = configuracoes; this.imagens = imagens;
     }
     @PatchMapping(value={"/usuario", "/conta/{id}"}, consumes="application/json", produces="application/json")
     public ResponseEntity<CadastroPublicoResposta<UsuarioPublicoResposta>> atualizarConta(
             @PathVariable(required=false) UUID id, @RequestBody Map<String,Object> campos, HttpServletRequest request) {
-        return resposta(UsuarioPublicoResposta.de(contas.atualizar(identidade(request), id, campos)));
+        var conta = contas.atualizar(identidade(request), id, campos);
+        return resposta(UsuarioPublicoResposta.de(conta, imagens.imagemDe(conta.id())));
     }
     @GetMapping(value="/artesaos/{slug}/configuracoes", produces="application/json")
     public ResponseEntity<CadastroPublicoResposta<ConfiguracoesAtelieService.Configuracoes>> consultar(

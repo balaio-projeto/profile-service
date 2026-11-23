@@ -29,13 +29,7 @@ public class MidiaPerfilService {
     }
     public MidiaPerfil armazenar(IdentidadeAutenticada identidade, byte[] arquivo) {
         var perfil = perfis.consultarMeu(identidade);
-        if (arquivo == null) {
-            throw new MidiaException(MidiaException.Motivo.ARQUIVO_INVALIDO);
-        }
-        if (arquivo.length > ValidarImagem.MAX_BYTES) {
-            throw new MidiaException(MidiaException.Motivo.ARQUIVO_MUITO_GRANDE);
-        }
-        byte[] bytes = arquivo.clone();
+        byte[] bytes = copiaLimitada(arquivo);
         String tipo = validar.tipo(bytes);
         UUID id = UUID.randomUUID();
         var midia = new MidiaPerfil(id, perfil.id(), "profile/" + perfil.id() + "/" + id,
@@ -46,6 +40,31 @@ public class MidiaPerfilService {
         storage.enviar(midia, bytes);
         midias.ativar(midia);
         return midia;
+    }
+    public MidiaPerfil armazenarDaConta(UUID contaId, byte[] arquivo) {
+        byte[] bytes = copiaLimitada(arquivo);
+        String tipo = validar.tipo(bytes);
+        UUID id = UUID.randomUUID();
+        var midia = MidiaPerfil.daConta(id, contaId, "account/" + contaId + "/" + id, tipo, bytes.length, hash(bytes));
+        midias.reservar(midia);
+        storage.enviar(midia, bytes);
+        midias.ativarDaConta(midia);
+        return midia;
+    }
+    public void removerDaConta(UUID contaId) {
+        midias.removerDaConta(contaId);
+    }
+    public String imagemDaConta(UUID contaId) {
+        return midias.imagemDaConta(contaId);
+    }
+    private static byte[] copiaLimitada(byte[] arquivo) {
+        if (arquivo == null) {
+            throw new MidiaException(MidiaException.Motivo.ARQUIVO_INVALIDO);
+        }
+        if (arquivo.length > ValidarImagem.MAX_BYTES) {
+            throw new MidiaException(MidiaException.Motivo.ARQUIVO_MUITO_GRANDE);
+        }
+        return arquivo.clone();
     }
     public byte[] recuperar(UUID id) {
         return recuperarConteudo(id).bytes();

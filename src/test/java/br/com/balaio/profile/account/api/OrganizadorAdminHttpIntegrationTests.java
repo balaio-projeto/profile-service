@@ -7,6 +7,8 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -184,9 +186,101 @@ class OrganizadorAdminHttpIntegrationTests {
         assertThat(papelNoBanco(alvo)).isEqualTo("comprador");
     }
 
+    @Test
+    void adminBuscaContaPorEmailERecebeIdNomeEmailEPapel() throws Exception {
+        UUID admin = conta("admin", false);
+        UUID alvo = conta("organizador", false, "alvo.busca@example.test");
+
+        HttpResponse<String> resposta = get("  Alvo.Busca@Example.TEST ", token(admin));
+
+        assertThat(resposta.statusCode()).isEqualTo(200);
+        assertThat(resposta.headers().firstValue("Cache-Control")).contains("no-store");
+        assertThat(resposta.body())
+                .contains("\"id\":\"" + alvo + "\"")
+                .contains("\"nome\":\"Nome de teste\"")
+                .contains("\"email\":\"alvo.busca@example.test\"")
+                .contains("\"papel\":\"organizador\"")
+                .contains("\"erro\":null")
+                .doesNotContain("senha", "bcrypt", "troca");
+    }
+
+    @Test
+    void buscaSemTokenRetorna401() throws Exception {
+        conta("comprador", false, "sem.token@example.test");
+
+        HttpResponse<String> resposta = get("sem.token@example.test", null);
+
+        assertThat(resposta.statusCode()).isEqualTo(401);
+        assertThat(resposta.body()).contains("NAO_AUTENTICADO").doesNotContain("sem.token@example.test");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "comprador", "artesao", "organizador" })
+    void buscaPorNaoAdministradorRetorna403SemRevelarConta(String papelChamador) throws Exception {
+        UUID chamador = conta(papelChamador, false);
+        conta("comprador", false, "alvo.oculto@example.test");
+
+        HttpResponse<String> resposta = get("alvo.oculto@example.test", token(chamador));
+
+        assertThat(resposta.statusCode()).isEqualTo(403);
+        assertThat(resposta.body()).contains("SEM_PERMISSAO").doesNotContain("alvo.oculto@example.test");
+    }
+
+    @Test
+    void buscaPorNaoAdministradorComEmailInvalidoContinuaRetornando403() throws Exception {
+        UUID chamador = conta("comprador", false);
+
+        assertThat(get("nao-e-email", token(chamador)).statusCode()).isEqualTo(403);
+    }
+
+    @Test
+    void buscaPorAdministradorComTrocaDeSenhaPendenteRetorna403() throws Exception {
+        UUID admin = conta("admin", true);
+        conta("comprador", false, "pendente@example.test");
+
+        assertThat(get("pendente@example.test", token(admin)).statusCode()).isEqualTo(403);
+    }
+
+    @Test
+    void buscaDeEmailSemContaRetorna404() throws Exception {
+        UUID admin = conta("admin", false);
+
+        HttpResponse<String> resposta = get("ninguem@example.test", token(admin));
+
+        assertThat(resposta.statusCode()).isEqualTo(404);
+        assertThat(resposta.body()).contains("CONTA_NAO_ENCONTRADA");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = { "nao-e-email", "   ", "a@b" })
+    void buscaComEmailInvalidoRetorna400(String email) throws Exception {
+        UUID admin = conta("admin", false);
+
+        HttpResponse<String> resposta = get(email, token(admin));
+
+        assertThat(resposta.statusCode()).isEqualTo(400);
+        assertThat(resposta.body()).contains("EMAIL_INVALIDO");
+    }
+
+    @Test
+    void buscaSemParametroEmailRetorna400() throws Exception {
+        UUID admin = conta("admin", false);
+
+        HttpResponse<String> resposta = cliente.send(HttpRequest.newBuilder(
+                        URI.create("http://localhost:" + porta + "/api/v1/admin/contas"))
+                .header("Authorization", "Bearer " + token(admin)).GET().build(), HttpResponse.BodyHandlers.ofString());
+
+        assertThat(resposta.statusCode()).isEqualTo(400);
+        assertThat(resposta.body()).contains("EMAIL_INVALIDO");
+    }
+
     private UUID conta(String papel, boolean trocaSenhaObrigatoria) {
+        return conta(papel, trocaSenhaObrigatoria, "conta-" + UUID.randomUUID() + "@example.test");
+    }
+
+    private UUID conta(String papel, boolean trocaSenhaObrigatoria, String email) {
         var conta = cadastrar.cadastrar(new CadastrarContaPublicaComando(
-                "Nome de teste", "conta-" + UUID.randomUUID() + "@example.test", SENHA, "comprador"));
+                "Nome de teste", email, SENHA, "comprador"));
         jdbc.update("update contas set papel = ?, troca_senha_obrigatoria = ? where id = ?",
                 papel, trocaSenhaObrigatoria, conta.id());
         return conta.id();
@@ -199,6 +293,16 @@ class OrganizadorAdminHttpIntegrationTests {
 
     private String papelNoBanco(UUID id) {
         return jdbc.queryForObject("select papel from contas where id = ?", String.class, id);
+    }
+
+    private HttpResponse<String> get(String email, String token) throws Exception {
+        var builder = HttpRequest.newBuilder(URI.create("http://localhost:" + porta + "/api/v1/admin/contas?email="
+                        + URLEncoder.encode(email, StandardCharsets.UTF_8)))
+                .GET();
+        if (token != null) {
+            builder.header("Authorization", "Bearer " + token);
+        }
+        return cliente.send(builder.build(), HttpResponse.BodyHandlers.ofString());
     }
 
     private HttpResponse<String> patch(UUID alvo, String corpo, String token) throws Exception {
