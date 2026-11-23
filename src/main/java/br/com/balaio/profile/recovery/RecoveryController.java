@@ -13,7 +13,9 @@ public class RecoveryController {
     public RecoveryController(RecoveryService service) { this.service = service; }
 
     public record Request(@NotBlank String email) {}
-    public record Reset(String token, String novaSenha) {}
+    public record Reset(String token, String novaSenha) {
+        @Override public String toString() { return "Reset[REDACTED]"; }
+    }
     public record Receipt(boolean recebida) {}
     public record ResetReceipt(boolean redefinida) {}
 

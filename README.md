@@ -2,6 +2,122 @@
 
 Contas, perfis de compradores e artesãos, selo e curadoria. O serviço é independente, usa Java 25 e Spring Boot 4.1.1 e recebe requisições externas por meio do api-gateway.
 
+## PI-209 — conta e configurações privadas
+
+`PATCH /api/v1/usuario` e o alias `PATCH /api/v1/conta/{id}` editam somente
+`nome` e `email` da própria conta autenticada. Campos omitidos são preservados;
+campos desconhecidos, valores nulos e tipos incorretos são recusados. O nome
+segue o limite existente de 240 caracteres; o e-mail é normalizado e permanece
+único, inclusive sob concorrência. O alias não permite editar outro UUID.
+Respostas usam o usuário público existente e `Cache-Control: no-store`.
+E-mail duplicado retorna 409/EMAIL_EM_USO; entrada inválida retorna
+400/REQUISICAO_INVALIDA com `erro.campos`; autenticação/autorização usam 401/403.
+
+`POST /api/v1/auth/alterar-senha` continua sendo a única implementação da troca
+de senha, com `senhaAtual` e `novaSenha`; o frontend passou a chamar esse contrato.
+
+`GET/PATCH /api/v1/artesaos/{slug}/configuracoes` exigem Bearer JWT válido e
+papel atual de artesão proprietário. Não há acesso público ou exceção de admin
+para a chave Pix. Os campos são `cepOrigem` (8 dígitos, com hífen opcional,
+normalizado para 00000-000), `prazoPadraoDias` (inteiro de 1 a 120),
+`aceitaEncomendas` e `encomendasPausadas` (booleanos) e `chavePix` (texto não vazio,
+sem caracteres de controle, com espaços externos removidos). Não há processamento
+ou validação bancária da chave. PATCH preserva campos ausentes e serializa
+atualizações concorrentes do mesmo ateliê. A V9 cria somente
+`configuracoes_atelie`, sem modificar o perfil cultural ou as migrations antigas.
+
+Um ateliê ainda não configurado retorna CEP/Pix vazios, prazo mínimo de 1 dia e
+ambas as opções desmarcadas; GET não grava dados. Esses valores iniciais permitem
+preencher o formulário, sem criar uma nova regra de encomendas. A chave só aparece
+na resposta privada das configurações, nunca no perfil público ou no usuário.
+Todas as respostas e erros desse recurso têm `Cache-Control: no-store` e erros
+internos são sanitizados. Mutações diretas também verificam Origin.
+
+O carregamento SSR de `/dashboard/settings` encaminha explicitamente o token
+obtido por `exigirArtesao()` usando `comToken`, sem mudar o cookie HttpOnly ou
+enviar o JWT como propriedade de componentes cliente. Via navegador, o proxy
+existente converte o cookie em Bearer. As configurações são persistidas no
+PostgreSQL do Profile, inclusive após reinício; GET não depende de memória local.
+
+Testes adicionais: `PreferenciasHttpTest` (PostgreSQL descartável e HTTP real).
+
+## PI-177 — curadoria do selo de artesão
+
+O Profile é a autoridade do selo de **artesão verificado**. Este selo não é o
+atributo `autentica` das peças (PI-174) e nenhuma decisão escreve no Catalog.
+
+- `GET /api/v1/artesao/selo`: `{ dados: { selo, solicitacao }, erro: null }`.
+  Sem histórico retorna `solicitacao: null`. A identidade vem exclusivamente do JWT
+  validado e da conta atual no banco; somente artesão consulta o próprio estado.
+- `POST /api/v1/artesao/selo`: `{ mensagem }`, texto opcional de até 1.000 caracteres,
+  sem tipos coercivos, nulos ou campos extras. Retorna 200 com o mesmo EstadoSelo.
+  Solicitação pendente ou selo já concedido gera `409 CONFLITO_ESTADO`.
+- `GET /api/v1/admin/curadoria`: lista somente pendentes, da mais antiga para a mais
+  recente, com os campos `id`, `artesaoSlug`, `artesao`, `atelie`, `mensagem`,
+  `situacao`, `solicitadoEm`, `motivo`, `decididoEm`, `territorio`, `tecnica`,
+  `imagem` e `pecasPublicadas` esperados pela interface.
+- `POST /api/v1/admin/curadoria/{id}/decisao`: `{ decisao: "aprovada" | "ajuste", motivo }`.
+  Ajuste exige motivo não vazio de até 1.000 caracteres. Aprovação aceita motivo
+  omitido ou vazio. Ambas retiram a solicitação da fila. Retorna 200 com a solicitação.
+
+As rotas administrativas reutilizam `AutorizarOperacaoAdministrativaUseCase`,
+inclusive papel atual no banco e restrição de troca obrigatória da senha. Ausência
+ou invalidade da sessão retorna 401; papel indevido retorna 403; ID ausente retorna
+404; JSON/UUID/campos inválidos retornam 400. Respostas mantêm `{ dados, erro }`,
+erros de campo usam `erro.campos` e rotas privadas usam `Cache-Control: no-store`.
+Mutações preservam a proteção de Origin existente. O Gateway converte o cookie em
+Bearer; chamadas diretas ao serviço usam Bearer, sem mudar o contrato JWT.
+
+A migration **V10** cria `solicitacoes_selo` no banco próprio, com FK do perfil,
+limites, estados e índices únicos para pendente/aprovada. Não altera migrations
+anteriores, nem campos culturais ou mídia. O selo público é derivado da existência
+de uma aprovação persistida; não há flag duplicada que possa divergir da decisão.
+A listagem pública consulta os IDs verificados em lote, e detalhe/próprio perfil
+consultam a mesma fonte. Campos privados da solicitação não são publicados.
+
+Regra de histórico adotada: cada reenvio após `ajuste` cria **novo UUID** e preserva
+a tentativa anterior e seu motivo. A tentativa atual é a mais recente. Uma decisão
+atrasada sobre o UUID anterior não pode decidir o novo pedido. A conta do artesão
+é bloqueada ao solicitar e a linha da solicitação é bloqueada ao decidir. Repetir
+mesma decisão/motivo normalizados retorna a resposta persistida, conservando data,
+autor e contagem conferida, mesmo se o Catalog estiver indisponível. Decisão ou
+motivo diferentes sobre pedido decidido retornam `409 CONFLITO_ESTADO`.
+
+`CATALOG_SERVICE_URL` aponta para a raiz do Catalog (padrão local
+`http://localhost:8081`; Compose usa `http://catalog-service:8081`). Fila e primeira
+decisão consultam **GET público `/api/v1/artesaos/{slug}/pecas`**, sem JWT para não
+incluir rascunhos do dono. A contagem usa peças publicadas/ativas do ateliê. A
+aprovação exige pelo menos uma, conforme critério já exibido em `/admin/criteria`.
+Não há cópia de peças nem leitura de banco alheio. Falha/contrato inválido do Catalog
+retorna `503 CATALOGO_INDISPONIVEL`, sem conceder selo ou fabricar contagem; nesse
+caso a primeira decisão deve ser repetida quando o Catalog voltar.
+
+Frontend: mantém telas e services existentes. Erro ao consultar o selo mostra erro
+e oculta o formulário; uma falha não vira "sem solicitação". A fila continua
+utilizável quando `/coletivos` falha, exibindo aviso para conferir o vínculo. O
+backend de coletivos continua no PI-183. Critérios estáticos não foram alterados.
+
+Testes: `CuradoriaHttpTest` usa HTTP real, PostgreSQL Testcontainers e um servidor
+HTTP de contrato do Catalog para falhas/contagem. `scripts/test-pi177-runtime.py`
+usa imagens reais de Catalog/Gateway/Frontend, Profile empacotado e dois Postgres
+descartáveis, incluindo reinício dos bancos/serviços e comparação integral da peça.
+Com `--browser`, executa solicitação → ajuste → reenvio → aprovação no Chrome,
+valida cookie HttpOnly e a falha SSR por injeção controlada somente no banco de
+teste. Todos os recursos de runtime têm nomes aleatórios; volumes existentes não
+são acessados nem apagados.
+
+```powershell
+# JDK 25 e Docker disponíveis
+.\mvnw.cmd verify
+Copy-Item target/profile-service-0.0.1-SNAPSHOT.jar target/pi177-profile.jar
+# Construir previamente as imagens locais de Frontend, Gateway e Catalog.
+python scripts/test-pi177-runtime.py target/pi177-profile.jar --browser
+```
+
+Limitação da referência: Confluence retornou 403 e a Fake API não está presente
+nesta cópia. Contratos foram conferidos com PI-177/28/20/169/171/172/174/183/249,
+`Frontend/docs/api.md`, tipos/services e APIs reais existentes.
+
 ## Stack inicial
 
 - Spring MVC, Spring Data JPA e PostgreSQL
@@ -87,7 +203,7 @@ O Compose local monta os volumes de chave automaticamente; fora do perfil `local
 
 ### Origin e limites da integração
 
-Cadastro, login/alias e logout verificam `Origin` antes dos efeitos. Quando presente, ele deve corresponder exatamente à allowlist; `null`, múltiplos valores e origem externa retornam **403 / SEM_PERMISSAO**. Se houver cookie `balaio_sessao`, a ausência de Origin também é rejeitada. Requisições sem cookie e sem Origin são permitidas para clientes de API; adicionar Bearer não dispensa a regra quando há cookie. Para repetir logout com cookie no Bruno, enviar Origin permitido ou remover o cookie do cliente.
+Cadastro, login/alias e logout verificam `Origin` antes dos efeitos. Quando presente, ele deve corresponder exatamente à allowlist; `null`, múltiplos valores e origem externa retornam **403 / SEM_PERMISSAO**. Se houver cookie `balaio_sessao`, a ausência de Origin também é rejeitada. Requisições sem cookie e sem Origin são permitidas para clientes de API; adicionar Bearer não dispensa a regra quando há cookie. Para repetir logout com cookie no REST Client (`docs/exemplos-autenticacao.http`), enviar Origin permitido ou remover o cookie do cliente.
 
 Não há confiança em `Host`, `Forwarded` ou `X-Forwarded-*` para desligar Secure; `server.forward-headers-strategy=none`. HTTPS público deve usar `AUTH_COOKIE_SECURE=true`, inclusive quando o TLS terminar no proxy. O CORS do gateway e a propagação de credenciais são trabalho da etapa 4; esta etapa não adiciona CORS permissivo.
 
@@ -102,6 +218,60 @@ Os sete claims são obrigatórios: `sub` UUID canônico, `papel` conhecido no do
 Após a validação, o serviço consulta `ContasPort.buscarPorId` e retorna **200** com o mesmo `{dados:usuarioPublico,erro:null}` de login, usando nome, e-mail e papel **atuais do PostgreSQL**, mesmo se o papel do JWT tiver mudado desde a emissão. `perfil` continua omitido para administrador; senha, hash, JWT e indicador de troca não são expostos. Token ausente/inválido ou conta inexistente produzem o mesmo **401 / NAO_AUTENTICADO**, com envelope sanitizado. Sucesso e 401 incluem `Cache-Control: no-store` e não emitem cookie.
 
 Essa validação fica restrita à consulta de usuário. Regras de autorização dos demais recursos e cadeias globais de segurança dos serviços permanecem nas etapas próprias.
+
+## Contrato JWT pelo gateway — exemplos executáveis (PI-261)
+
+Os mesmos exemplos existem em formato REST Client em [`docs/exemplos-autenticacao.http`](docs/exemplos-autenticacao.http) (extensão REST Client do VS Code ou `httpyac`). O cliente guarda o cookie `balaio_sessao` entre as requisições; para os exemplos com Bearer, copie o valor do cookie da resposta de login para a variável `@jwt`. Nenhum segredo real é usado: a conta é criada na hora com e-mail `@teste.local`.
+
+Resumo do contrato validado pelos exemplos:
+
+- Cadastro (`201`) e login (`200`) devolvem `{dados:usuarioPublico,erro:null}` e `Set-Cookie: balaio_sessao=<JWT>; Path=/api/v1; Max-Age=3600; HttpOnly; SameSite=Lax` (`Secure` quando `AUTH_COOKIE_SECURE=true`; desligado apenas no perfil `local` em HTTP).
+- O JWT é RS256 com `sub`, `papel`, `iss`, `aud`, `iat`, `exp` e `jti`, válido por 60 minutos, sem refresh token. Gateway e serviços recebem só a chave pública.
+- O gateway aceita o cookie do navegador ou `Authorization: Bearer <JWT>`, valida o token e encaminha Bearer ao serviço dono, que valida de novo e decide o papel e a posse do recurso.
+- Métodos que alteram dados com cookie exigem `Origin` da allowlist (`AUTH_ALLOWED_ORIGINS`); origem externa recebe `403 / SEM_PERMISSAO`.
+- `POST /auth/logout` expira o cookie (`Max-Age=0`). **Um JWT copiado antes do logout continua válido até `exp`**; não há revogação imediata nesta release.
+- Sem credencial, token adulterado, expirado ou com audiência errada: `401 / NAO_AUTENTICADO`. Papel sem permissão: `403 / SEM_PERMISSAO` no gateway ou no serviço.
+
+Roteiro com `curl` contra a pilha local (`http://localhost:8080`), executado em 22/11/2026:
+
+```bash
+G=http://localhost:8080/api/v1
+O="Origin: http://localhost:4321"
+EMAIL="exemplo-$(date +%s)@teste.local"
+SENHA='SenhaDeTeste123!'
+
+curl -i -c sessao.jar -H "$O" -H 'Content-Type: application/json' -d "{\"nome\":\"Pessoa Exemplo\",\"email\":\"$EMAIL\",\"senha\":\"$SENHA\",\"perfil\":\"comprador\"}" $G/auth/cadastro
+curl -i -c sessao.jar -H "$O" -H 'Content-Type: application/json' -d "{\"email\":\"$EMAIL\",\"senha\":\"$SENHA\"}" $G/auth/login
+JWT=$(awk '$6 == "balaio_sessao" {print $7}' sessao.jar)
+
+curl -i -b sessao.jar $G/usuario
+curl -i -H "Authorization: Bearer $JWT" $G/usuario
+curl -i $G/usuario
+PAYLOAD=$(cut -d. -f2 <<<"$JWT" | tr '_-' '/+'); while [ $(( ${#PAYLOAD} % 4 )) -ne 0 ]; do PAYLOAD="$PAYLOAD="; done
+FORJADO=$(base64 -d <<<"$PAYLOAD" | sed 's/"papel":"comprador"/"papel":"admin"/' | base64 -w0 | tr '/+' '_-' | tr -d '=')
+curl -i -H "Authorization: Bearer $(cut -d. -f1 <<<"$JWT").$FORJADO.$(cut -d. -f3 <<<"$JWT")" $G/admin/curadoria
+curl -i -H "Authorization: Bearer $JWT" $G/admin/curadoria
+curl -i -b sessao.jar -X PATCH -H 'Origin: https://origem-externa.example' -H 'Content-Type: application/json' -d '{"nome":"Nome Alterado"}' $G/usuario
+curl -i -b sessao.jar -c sessao.jar -X POST -H "$O" $G/auth/logout
+curl -i -b sessao.jar $G/usuario
+curl -i -H "Authorization: Bearer $JWT" $G/usuario
+```
+
+| Passo | Resultado obtido |
+|---|---|
+| Cadastro de comprador | `201`, envelope com `papel: comprador` e `Set-Cookie balaio_sessao` |
+| Login | `200` e novo `Set-Cookie balaio_sessao`; senha errada dá `401 / CREDENCIAIS_INVALIDAS` |
+| `GET /usuario` com cookie | `200` com o usuário público |
+| `GET /usuario` com `Authorization: Bearer` | `200` com o mesmo usuário |
+| `GET /usuario` sem credencial | `401 / NAO_AUTENTICADO` |
+| Token com payload trocado para `papel: admin` e assinatura original em `GET /admin/curadoria` | `401 / NAO_AUTENTICADO` |
+| Comprador em `GET /admin/curadoria` | `403 / SEM_PERMISSAO` (gateway) |
+| `PATCH /usuario` por cookie com Origin externo | `403 / SEM_PERMISSAO` |
+| Logout | `200`, `{encerrada:true}` e `Set-Cookie balaio_sessao=; Max-Age=0` |
+| `GET /usuario` com o cookie após logout | `401 / NAO_AUTENTICADO` |
+| `GET /usuario` com Bearer copiado antes do logout | `200` até `exp` (limitação documentada) |
+
+O serviço dono também recusa papel inadequado quando o gateway deixa passar uma rota autenticada genérica: artesão com Bearer válido em `GET /usuario/enderecos` recebe `403 / SEM_PERMISSAO` do profile-service. Token expirado e audiência errada são cobertos pelos testes automatizados do gateway e do profile-service, pois não dá para produzi-los com a chave local sem esperar 60 minutos.
 
 ## Contas e primeiro administrador
 
@@ -143,6 +313,23 @@ A trava do singleton permanece até commit ou rollback. Assim, a segunda operaç
 
 O modelo atual não possui indicador de ativação nem operações de remoção/desativação. Portanto, contas existentes com papel `admin` compõem a contagem de administradores ativos nesta etapa. Pendência de troca restringe ações administrativas, mas não equivale a desativação. Não foram criadas operações de ciclo de vida; quando existirem, deverão reutilizar a trava e a verificação do último administrador antes de remover sua condição ativa. Curadoria de selo pertence à PI-177 e não integra esta entrega.
 
+## Organizador de eventos — PI-210
+
+O papel `organizador` é persistido (`V13__organizador_papel.sql`, migration aditiva que amplia `ck_contas_papel`) e emitido na claim `papel` do JWT. O cadastro público continua aceitando somente `comprador` e `artesao`; `papel` ou `perfil` com `organizador` é recusado sem criar conta. Na resposta de usuário, `perfil` aparece apenas para comprador e artesão.
+
+Provisionamento (desenvolvimento e homologação): `PATCH /api/v1/admin/contas/{id}/papel` com corpo `{"papel":"organizador"}` para atribuir ou `{"papel":"comprador"}` para remover. O endpoint é restrito a administrador autenticado (`ValidarSessaoAdapter`, papel e troca de senha conferidos no banco). Aceita apenas as transições `comprador → organizador` e `organizador → comprador`; repetir a operação é idempotente. Não é uma API genérica de promoção a `admin`.
+
+| Situação | Status | `erro.codigo` |
+| --- | --- | --- |
+| Sem JWT válido | 401 | `NAO_AUTENTICADO` |
+| Chamador não administrador ou troca de senha pendente | 403 | `SEM_PERMISSAO` |
+| Valor fora de `organizador`/`comprador`, JSON inválido | 400 | `REQUISICAO_INVALIDA` |
+| Conta inexistente | 404 | `CONTA_NAO_ENCONTRADA` |
+| Transição não permitida (ex.: artesão → organizador) | 409 | `TRANSICAO_PAPEL_INVALIDA` |
+| Sucesso | 204 sem corpo e sem token novo | — |
+
+Procedimento: criar a conta como comprador pelo cadastro público; autenticar um administrador; chamar o `PATCH` com o `id` da conta; pedir à conta alvo que encerre a sessão e faça novo login. O JWT anterior mantém a claim antiga até `exp`, com janela de até 3600 segundos; não há revogação imediata neste contrato. Para remover o papel, use `{"papel":"comprador"}` e repita o mesmo procedimento de novo login.
+
 ## Testes e escopo
 
 Execute `.\mvnw.cmd -B -ntp clean verify` com JDK 25 e Docker ativo. A compilação limpa também remove classes e migrations antigas de `target/` depois de desfazer alterações. Os testes usam PostgreSQL 18 descartável via Testcontainers, sem usar o banco do projeto nem ler credenciais locais. Confira `java -version` e `JAVA_HOME` no terminal usado pelo Maven; a versão declarada no POM não seleciona automaticamente um JDK instalado.
@@ -168,3 +355,292 @@ Configure externamente `PROFILE_FRONTEND_BASE_URL`, `PROFILE_RECOVERY_TOKEN_TTL`
 **JWT emitidos antes da redefinição permanecem válidos até expirar.** PI-168 usa JWT RS256 sem lista de revogação nem tabela de sessões; esta integração não cria mecanismo paralelo. O login com a senha antiga falha, e o login com a nova funciona. A revogação imediata de JWT requer decisão de segurança e alteração coordenada dos validadores/consumidores. O logout continua apenas limpando o cookie no navegador, conforme o contrato existente.
 
 Os testes US34 reutilizam o PostgreSQL 18 descartável de `PostgreSQLTestConfiguration`. Execute `.\mvnw.cmd -B -ntp clean verify` com JDK 25 e Docker ativo. O envio externo deve ser validado com uma caixa SMTP controlada e a URL pública do ambiente; os testes automatizados não precisam de credenciais reais.
+
+### PI-170 — SMTP por ambiente e validação ponta a ponta
+
+Os endpoints, o hash/expiração/uso único dos tokens e o envio após commit foram
+preservados. O retorno **201** confirma que o pedido foi recebido; ele não promete
+entrega do e-mail e continua indistinguível para conta existente ou ausente.
+Falhas do SMTP são registradas sem token, link, senha ou destinatário. O DTO de
+redefinição também oculta token e senha em sua representação de log.
+
+O Gateway permite o **POST exato `/api/v1/auth/redefinicao`** sem sessão, assim
+como a solicitação de recuperação. Essa omissão na borda impedia o uso do link
+recebido pelo navegador. O token é validado pelo Profile; Origin/cookie continuam
+protegidos e `/auth/alterar-senha` permanece autenticado. Outros métodos/caminhos
+não recebem essa permissão.
+
+O provedor é selecionado pelas variáveis existentes. Para **Gmail**, configure
+somente no `.env` local ignorado ou no secret store do ambiente:
+
+```dotenv
+PROFILE_SMTP_HOST=smtp.gmail.com
+PROFILE_SMTP_PORT=587
+PROFILE_SMTP_USERNAME=<conta Gmail autorizada>
+PROFILE_SMTP_PASSWORD=<senha de app>
+PROFILE_SMTP_AUTH=true
+PROFILE_SMTP_STARTTLS=true
+PROFILE_MAIL_FROM=<remetente autorizado>
+PROFILE_FRONTEND_BASE_URL=https://<frontend acessivel da homologacao>
+```
+
+O Google exige uma [senha de app](https://support.google.com/accounts/answer/185833?hl=pt-BR)
+para este fluxo SMTP sem OAuth, com verificação em duas etapas habilitada. Não use
+a senha normal da conta. Host, porta e STARTTLS seguem a
+[configuração SMTP oficial](https://support.google.com/mail/answer/7104828?hl=pt-BR).
+Nenhuma credencial pessoal deve ser escrita em exemplos, testes ou relatórios.
+
+STARTTLS habilitado também é obrigatório, e a identidade/cadeia do certificado
+continuam validadas. SMTP autenticado sem TLS, credenciais ausentes, trust que
+contorne o certificado, debug SMTP ou timeouts ilimitados impedem a inicialização.
+Os limites padrão são conexão **5 s**, leitura **10 s**, escrita **10 s**; podem ser
+ajustados por `PROFILE_SMTP_CONNECTION_TIMEOUT`, `PROFILE_SMTP_READ_TIMEOUT` e
+`PROFILE_SMTP_WRITE_TIMEOUT`, em milissegundos e com valores positivos.
+
+SMTP local continua disponível: loopback sem autenticação pode usar porta 1025;
+nomes de serviço Docker, como `mailpit`, sem TLS só são aceitos no perfil `local`.
+Nesse caso use `PROFILE_SMTP_AUTH=false` e `PROFILE_SMTP_STARTTLS=false`.
+`localhost` dentro do container aponta para o próprio container, não para o host.
+Os testes abaixo iniciam seu próprio Mailpit, sem relay nem entrega externa.
+
+`PROFILE_FRONTEND_BASE_URL` deve ser uma URL absoluta HTTPS da aplicação, sem
+usuário/senha, query ou fragmento; HTTP é aceito somente para loopback local.
+Exemplo local: `http://localhost:4321`. Um prefixo válido, como
+`https://site.example/market/`, é preservado e gera `/market/login/reset?token=...`.
+A rota de redefinição continua sendo **`/login/reset`**; o token não entra em logs.
+Não use localhost como URL de homologação, pois o destinatário abriria a própria
+máquina. Depois de configurar um SMTP externo válido, recrie somente o Profile
+para atualizar suas variáveis, sem remover volumes:
+
+```powershell
+docker compose up -d --no-deps --build --wait profile-service
+```
+
+A tela de redefinição reutiliza a validação compartilhada: mínimo **12 codepoints**,
+máximo **72 bytes UTF-8**, sem controles ou UTF-16 inválido, sem trim da senha.
+36 letras `é` ocupam 72 bytes; 18 emojis de quatro bytes também. Os testes cobrem
+esses limites e recusam 37 letras `é`, 19 emojis e 11 emojis (apesar de 22 unidades
+UTF-16). Essa regra mantém a política existente do servidor.
+
+`RecoveryMailpitHttpTest` usa Mailpit **v1.34.0**, PostgreSQL descartável e HTTP
+real, sem mock de `JavaMailSender`: recebe o e-mail por SMTP, extrai seu link,
+redefine, autentica com a nova senha e recusa senha anterior/token usado/expirado.
+Os testes unitários e de concorrência anteriores permanecem. Para executar:
+
+```powershell
+.\mvnw.cmd -Dtest=RecoveryConfigurationTest,RecoveryMailpitHttpTest,RecoveryIntegrationTest test
+```
+
+`scripts/test-pi170-runtime.py` testa as imagens reais do Profile, Gateway e
+Frontend com Mailpit/PostgreSQL novos. Exercita Chrome desktop/mobile, validação
+Unicode antes do POST, resposta uniforme, link recebido por SMTP, senha nova,
+reutilização, expiração, cookie HttpOnly e ausência de rolagem horizontal. Não lê
+o `.env` real, não depende do Gmail e remove somente os recursos aleatórios que
+criou. Pré-requisitos: Docker, PowerShell 7, Chrome e dependências do frontend.
+
+```powershell
+# Em platform, preparar as imagens locais (não altera bancos).
+docker compose build profile-service api-gateway frontend
+# Em profile-service:
+python scripts/test-pi170-runtime.py
+```
+
+**Validação externa:** os testes com Mailpit não comprovam chegada no Gmail.
+Com credenciais e URL pública disponíveis, validar conexão/autenticação, solicitar
+recuperação para uma conta controlada, confirmar recebimento na caixa de teste,
+abrir o link e completar redefinição/login. Se faltar configuração, essa etapa
+permanece pendente; nenhum envio externo faz parte dos testes automatizados.
+
+## Midias do perfil — PI-214, Etapa 3
+
+Branch baseada em `origin/PI-171` no commit `1e5beb3`.
+O modulo `artisan.media` prepara operacoes de aplicacao para enviar, substituir,
+recuperar e remover imagens. Os controllers atuais continuam usando os contratos
+do PI-171. A Etapa 4 acrescenta os endpoints HTTP descritos abaixo.
+
+O adapter usa AWS SDK Java v2 2.42.22, cliente sincrono e path-style. Recebe
+`MEDIA_S3_ENDPOINT`, `MEDIA_S3_REGION`, `MEDIA_S3_BUCKET`,
+`MEDIA_S3_ACCESS_KEY_ID` e `MEDIA_S3_SECRET_ACCESS_KEY`. As credenciais devem ser
+da identidade consumidora provisionada pelo platform. Sem endpoint configurado,
+os recursos existentes iniciam normalmente e operacoes S3 falham com erro de
+indisponibilidade. Endpoint configurado exige credenciais explicitas.
+
+V7 acrescenta `midias_perfil`, com UUID, perfil proprietario, chave, MIME, tamanho,
+SHA-256, estado e data. Bytes permanecem somente no storage. O bucket e uma
+configuracao da instalacao; sua alteracao requer migrar os objetos existentes.
+O campo `imagem` guarda a referencia `/api/v1/arquivos/perfis/{midiaId}`, independente
+do slug. A Etapa 4 disponibiliza este caminho. DTOs HTTP continuam
+devolvendo `imagem`, sem serializar as chaves internas de `MidiaPerfil`.
+
+JPEG/PNG/WebP sao decodificados, com limite de 2 MiB e 20 milhoes de pixels antes
+da alocacao do raster. TwelveMonkeys ImageIO 3.12.0 acrescenta leitura WebP ao
+ImageIO do Java. O arquivo e mantido no formato original.
+
+O upload reserva uma linha PENDING e envia ao S3 fora de transacao de banco.
+A ativacao bloqueia a linha do perfil, troca `imagem` e marca a anterior DELETE
+na mesma transacao. Exclusao logica restaura o placeholder antes da exclusao
+fisica. O worker consulta a fila a cada 60 segundos. A V8 registra no PostgreSQL
+`proxima_tentativa`, reservando cada exclusao por cinco minutos antes da chamada
+S3. Falhas e interrupcoes preservam esse prazo. Outros registros elegiveis podem
+avancar enquanto a tentativa anterior aguarda. DELETEs repetidos sao idempotentes.
+Linhas PENDING ou referencias abandonadas pelo PATCH aguardam 24 horas para
+reconciliacao, inclusive apos crash ou resultado incerto de commit. A limpeza
+confere novamente o vinculo sob bloqueio e nunca exclui uma imagem referenciada.
+O intervalo pode ser configurado por `balaio.media.cleanup-delay`.
+
+O PATCH preserva referencias legadas e aceita a referencia gerenciada atual.
+Uma referencia gerenciada diferente deve ser vinculada pela operacao de midia.
+O mesmo bloqueio e refresh coordenam PATCH e upload concorrentes. A V8 troca a
+foreign key da midia para `ON DELETE RESTRICT`, bloqueando exclusao do perfil e
+o cascade da conta enquanto existirem metadados de midia, inclusive pendentes.
+O futuro fluxo de exclusao de contas devera solicitar limpeza de todas as midias
+do perfil, aguardar confirmacao fisica e somente entao excluir a conta. Essa
+protecao impede perder chaves S3 e ainda exige o futuro fluxo de orquestracao.
+
+Erros de limpeza registram somente UUID da midia, etapa e categoria controlada.
+Quando a selecao da fila falha, o identificador aparece como indisponivel.
+Mensagens de excecao, chaves S3, credenciais e conteudo nao entram nesses logs.
+
+Testes requerem Java 25 e Docker para PostgreSQL descartavel. Execute
+`./mvnw test`. `S3MidiaIntegrationTest` e habilitado quando `MEDIA_S3_ENDPOINT`
+esta definido e usa somente o par consumidor, criando e removendo um objeto
+diagnostico unico em `profile/diagnostics/`. Nunca passar segredos literais na
+linha de comando ou publicar a configuracao resolvida do Compose.
+
+Validacao em 12/11/2026 com Java 25 em container e fontes copiados para tmpfs
+Linux para evitar latencia do bind Windows. `mvn -o -B -ntp test` concluiu com
+558 testes, zero falhas/erros e um teste S3 condicional ignorado. Esse teste foi
+executado separadamente contra SeaweedFS 4.53 com o par consumidor e passou.
+Os testes de banco usam PostgreSQL descartavel e verificam V5, associacao,
+rollback, placeholder, slug alterado, concorrencia com PATCH e upload sem
+transacao aberta. A V5 ainda sera aplicada ao ambiente principal ao publicar
+a imagem do servico na etapa de integracao.
+
+Revisao 3.1 em 13/11/2026 — o banco persistente local consultado estava na V4.
+A V5 foi preservada e as correcoes usam uma V6 aditiva, compativel com instalacoes
+que ja tenham aplicado V5. As provas de retomada recriam o worker usando a fila
+persistida no PostgreSQL descartavel, simulando interrupcao antes do DELETE e
+apos o DELETE antes da confirmacao. Os testes tambem cobrem 20 falhas persistentes
+com progresso do lote seguinte, vinculo reativado e bloqueio do cascade.
+
+Validacao 3.1 — a suite completa concluiu com 569 testes, zero falhas/erros e
+um teste S3 condicional ignorado. O teste S3 foi executado separadamente e passou
+contra o SeaweedFS local com a credencial consumidora. Foram acrescentados seis
+testes de persistencia/retomada e cinco testes de logs. A V6 foi aplicada somente
+nos PostgreSQL descartaveis da suite; o banco persistente local permanece na V4.
+
+### Endpoints de imagens da Etapa 4
+
+Todos os caminhos usam `/api/v1`. PUT e DELETE em `/artesao/me/imagem` exigem
+JWT e conta artesao verificada no PostgreSQL. O proprietario vem da sessao.
+PUT recebe `multipart/form-data`, campo `arquivo`, e substitui a imagem atual.
+DELETE restaura `/fotos/ImagemBase.webp`, mantendo a limpeza fisica posterior.
+Ambos retornam HTTP 200 com o perfil atualizado no envelope `{dados, erro}`,
+usando o mesmo `PerfilArtesaoResponse` do PI-171.
+
+GET e HEAD em `/arquivos/perfis/{midiaId}` sao publicos porque os perfis do
+contrato atual sao publicos. Exigem midia ACTIVE e vinculo atual com `imagem`.
+Imagens pendentes, substituidas ou removidas retornam 404. GET devolve bytes com
+MIME validado e SHA-256 conferido. HEAD consulta somente metadados vinculados,
+sem download S3. Ambos incluem Content-Length, Content-Type,
+`X-Content-Type-Options=nosniff` e `Cache-Control=no-store` para conferir o vinculo
+em cada leitura. O UUID permanece estavel se o slug mudar.
+
+O Profile aplica 2 MiB por arquivo, 3 MiB por requisicao multipart e gravacao
+temporaria em disco a partir de zero bytes. A resolucao lazy permite tratar
+erros no envelope HTTP. Os limites continuam validos com transferencia chunked.
+A aplicacao carrega o arquivo limitado em memoria apos autorizar o artesao.
+O gateway encaminha o corpo em streaming e recusa antecipadamente um tamanho
+declarado acima de 3 MiB nessa rota. A verificacao efetiva de cada arquivo e de
+requisicoes sem Content-Length acontece no Profile. Formatos e limite de
+20 milhoes de pixels usam `ValidarImagem`.
+
+Erros usam o envelope existente. Os codigos HTTP sao 400 para arquivo vazio,
+ausente ou requisicao invalida, 401 para sessao ausente/invalida, 403 para papel
+ou origem recusados, 404 para midia indisponivel, 413 para tamanho excedido,
+415 para formato nao suportado, 409 para conflito e 503 para indisponibilidade.
+Excecoes S3 e SQL nao sao serializadas. Cookies nas mutacoes exigem Origin
+permitido, inclusive no acesso direto ao Profile.
+
+No platform, atualize somente os dois servicos com
+`docker compose up --build -d --no-deps profile-service api-gateway`.
+Em bancos compativeis com a develop ate V5, Flyway aplica V7/V8. Veja a nota de compatibilidade abaixo antes de atualizar bancos antigos.
+O frontend devera enviar FormData e resolver o caminho de `imagem` pelo gateway
+na Etapa 5. Os endpoints JSON e o campo `imagem` mantem os contratos do PI-171.
+
+As propriedades multipart seguem a documentacao oficial do Spring Boot.
+[Referencia de propriedades](https://docs.spring.io/spring-boot/appendix/application-properties/)
+
+Validacao da Etapa 4 em 13/11/2026 — Java 25 em container, PostgreSQL descartavel
+e SeaweedFS 4.53 local. A suite Profile concluiu com 587 testes, zero falhas/erros
+e um teste S3 condicional ignorado. Gateway concluiu 231 testes, zero falhas/erros.
+Foram acrescentados 18 casos HTTP no Profile e oito no gateway. A regressao inclui
+as provas anteriores de concorrencia com PATCH, reserva persistida de limpeza e
+protecao ON DELETE RESTRICT.
+
+Integracao real em http://localhost:8080, com conta artesao descartavel criada e
+autenticada via HTTP. Upload WebP com Bearer, substituicao PNG com cookie/Origin,
+GET anonimo e HEAD passaram. SHA-256 original e recuperado identicos para ambas
+as imagens. URLs substituidas/removidas retornaram 404 em GET e HEAD. DELETE
+retornou o perfil com placeholder. Content-Type incorreto retornou 415 no envelope.
+Envios explicitamente chunked acima de 2 MiB e 3 MiB retornaram 413 pelo gateway.
+
+Hashes dos arquivos diagnosticos publicos usados no teste, em hexadecimal
+`c90cff659645a312a28804965f3dbc34061338f7234ff5d6ddb2c57e9eadec15` para WebP e
+`fa137cfeddf9be254e60055e23c43d5b8663f5292b3cf1453cd52cd2d7d9fcd7` para PNG.
+V5 e V6 foram aplicadas automaticamente ao banco local na publicacao desta etapa.
+As evidencias de V4 nas secoes anteriores descrevem o estado anterior.
+
+A integracao com FormData, proxy e exibicao no navegador pertence a Etapa 5.
+O teste HTTP desta etapa valida a cadeia gateway -> Profile -> S3.
+
+A limpeza fisica foi confirmada pelo worker antes da exclusao de cada conta
+exclusiva de diagnostico. Conferencia final encontrou zero contas/metadados dessas
+fixtures, 13 containers saudaveis, os 11 containers fora da atualizacao com os
+mesmos IDs, seis volumes originais e nove arquivos locais protegidos com hashes
+identicos. A busca em memoria pelas quatro credenciais S3 reais encontrou zero
+ocorrencias nos arquivos entregaveis e nos logs dos tres servicos conferidos.
+
+## Integracao PI-214 sobre develop — 19/11/2026
+
+A base desta entrega e `1adaab1`. O PI-171 atual e a refatoracao de recuperacao
+foram preservados: DTO com id da conta, slug `artesao-<UUID da conta>`, criacao
+do perfil no primeiro acesso de artesao antigo e um unico GET `/artesao/me`.
+As adicoes de midia nao substituem esses contratos.
+
+As evidencias V5/V6 nas secoes historicas acima descrevem a branch original
+`feat/pi-214-entrega-profile-service`, que continua preservada. Na integracao
+atual, V1 a V5 da develop permanecem byte a byte iguais. Midia entra em duas
+novas migrations V7/V8; a numeracao V6 fica reservada a entrega legada.
+
+Banco que ja aplicou a antiga `V5__create_midias_perfil.sql` e
+`V6__protect_media_cleanup.sql` NAO e compativel automaticamente com esta
+linhagem. Nao executar repair, alterar checksums ou apagar tabelas/volumes.
+A transicao desse banco exige planejamento separado, copia protegida e prova
+de restauracao. O ambiente novo baseado na develop usa V5 de slugs + V7/V8.
+Nenhum banco persistente foi migrado durante a resolucao dos conflitos.
+
+Sem MEDIA_S3_ENDPOINT, o servico inicia e as operacoes que necessitam do S3
+retornam indisponibilidade; nunca ha fallback anonimo. Executar o preparador
+explicito do Platform habilita o endpoint local e preserva credenciais existentes.
+O perfil `storage` deve ser iniciado junto ao servico quando midia for habilitada.
+
+Testes novos cobrem a atualizacao de um banco V5 da develop sem perda de perfil
+ou alteracao dos checksums anteriores, e upload de um artesao sem perfil,
+preservando o identificador e slug definidos pelo PI-171.
+
+Foi reproduzida uma interrupcao de conexao em uploads rejeitados acima de 3 MiB.
+O limite de descarte do Tomcat foi ajustado de forma finita para 4 MiB, permitindo
+receber o envelope HTTP 413. Isso nao aumenta o limite aceito de arquivo (2 MiB)
+nem de requisicao multipart (3 MiB).
+Referencia: [HTTP Connector / maxSwallowSize](https://tomcat.apache.org/tomcat-11.0-doc/config/http.html).
+
+### Validacao desta integracao
+
+Em 19/11/2026: build limpo e suite completa com 611 casos, zero falhas/erros
+e um teste S3 condicional ignorado. Os 19 casos HTTP passaram, incluindo o
+HTTP 413 acima dos limites. Upgrade V5 da develop -> V7/V8 foi testado em
+PostgreSQL descartavel, preservando perfil, imagem legada e checksums V1-V5.
+A politica S3 real foi validada separadamente no Platform com quatro
+credenciais aleatorias, dados em tmpfs e nenhum volume da aplicacao.
+Nenhum banco ou container da aplicacao foi atualizado nesta resolucao.

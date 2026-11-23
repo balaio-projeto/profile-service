@@ -1,0 +1,78 @@
+@gateway = http://localhost:8080/api/v1
+@origem = http://localhost:4321
+@senha = SenhaDeTeste123!
+@jwt = COLE_AQUI_O_VALOR_DO_COOKIE_balaio_sessao
+@jwtForjado = eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIwMDAwMDAwMC0wMDAwLTQwMDAtODAwMC0wMDAwMDAwMDAwMDAiLCJwYXBlbCI6ImFkbWluIiwiaXNzIjoiYmFsYWlvLWxvY2FsIiwiYXVkIjoiYmFsYWlvLWFwaSIsImlhdCI6MTc5NTM4OTc3MywiZXhwIjoxODk1Mzg5NzczLCJqdGkiOiJmb3JqYWRvIn0.YXNzaW5hdHVyYS1mYWxzYQ
+
+### Cadastro de comprador: 201, envelope do usuário público e Set-Cookie balaio_sessao
+# @name cadastro
+POST {{gateway}}/auth/cadastro
+Origin: {{origem}}
+Content-Type: application/json
+
+{
+  "nome": "Pessoa Exemplo",
+  "email": "exemplo-{{$timestamp}}@teste.local",
+  "senha": "{{senha}}",
+  "perfil": "comprador"
+}
+
+### Login com o e-mail recém-cadastrado: 200 e novo Set-Cookie balaio_sessao
+# @name login
+POST {{gateway}}/auth/login
+Origin: {{origem}}
+Content-Type: application/json
+
+{
+  "email": "{{cadastro.response.body.$.dados.email}}",
+  "senha": "{{senha}}"
+}
+
+### Login com senha errada: 401 CREDENCIAIS_INVALIDAS, sem cookie
+POST {{gateway}}/auth/login
+Origin: {{origem}}
+Content-Type: application/json
+
+{
+  "email": "{{cadastro.response.body.$.dados.email}}",
+  "senha": "senha-errada-123"
+}
+
+### GET /usuario com o cookie guardado pelo cliente: 200
+GET {{gateway}}/usuario
+
+### GET /usuario com Authorization Bearer: 200
+GET {{gateway}}/usuario
+Authorization: Bearer {{jwt}}
+
+### GET /usuario sem credencial: 401 NAO_AUTENTICADO
+GET {{gateway}}/usuario
+Cookie: balaio_sessao=
+
+### Token forjado com papel admin e assinatura falsa: 401 NAO_AUTENTICADO
+GET {{gateway}}/admin/curadoria
+Authorization: Bearer {{jwtForjado}}
+
+### Comprador em rota de administrador: 403 SEM_PERMISSAO no gateway
+GET {{gateway}}/admin/curadoria
+Authorization: Bearer {{jwt}}
+
+### Alteração por cookie com Origin não permitido: 403 SEM_PERMISSAO
+PATCH {{gateway}}/usuario
+Origin: https://origem-externa.example
+Content-Type: application/json
+
+{
+  "nome": "Nome Alterado"
+}
+
+### Logout: 200, Set-Cookie balaio_sessao com Max-Age=0
+POST {{gateway}}/auth/logout
+Origin: {{origem}}
+
+### GET /usuario com o cookie depois do logout: 401 NAO_AUTENTICADO
+GET {{gateway}}/usuario
+
+### Bearer copiado antes do logout continua válido até exp: 200
+GET {{gateway}}/usuario
+Authorization: Bearer {{jwt}}

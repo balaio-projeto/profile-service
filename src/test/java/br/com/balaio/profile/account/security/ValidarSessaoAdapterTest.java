@@ -133,7 +133,7 @@ class ValidarSessaoAdapterTest {
         }
         Map<String, List<Object>> valores = Map.of(
                 "sub", List.of("invalido", "1-1-1-1-1", ID.toString().toUpperCase(), 123),
-                "papel", List.of("ADMIN", "organizador", "", 123),
+                "papel", List.of("ADMIN", "Organizador", "", 123),
                 "iss", List.of("https://outro.example.test", 123),
                 "aud", List.of("outra", List.of("outra"), List.of(), List.of(AutenticacaoTestFixtures.AUDIENCE, 123)),
                 "jti", List.of("", "  ", 123),

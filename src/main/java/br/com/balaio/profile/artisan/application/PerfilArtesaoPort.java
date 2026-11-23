@@ -8,6 +8,7 @@ import java.util.UUID;
 public interface PerfilArtesaoPort {
     List<PerfilArtesao> listar();
     Optional<PerfilArtesao> buscarPorSlug(String slug);
+    Optional<PerfilArtesao> buscarPorSlugParaAtualizar(String slug);
     Optional<PerfilArtesao> buscarPorContaId(UUID contaId);
     PerfilArtesao salvar(PerfilArtesao perfil);
 }

@@ -69,10 +69,23 @@ class PerfilArtesaoServiceTest {
         var conta = conta(Papel.ARTESAO);
         service.criarParaConta(conta);
 
-        var resposta = PerfilArtesaoResponse.de(perfis.buscarPorContaId(conta.id()).orElseThrow());
+        var resposta = PerfilArtesaoResponse.de(perfis.buscarPorContaId(conta.id()).orElseThrow(), false);
 
         assertThat(resposta.id()).isEqualTo(conta.id());
         assertThat(resposta.slug()).isEqualTo("artesao-" + conta.id());
+        assertThat(resposta.obrasComercializadas()).isNull();
+        assertThat(resposta.avaliacaoMedia()).isNull();
+    }
+
+    @Test
+    void listagemPublicaSemPerfisRetornaListaVazia() {
+        assertThat(service.listar()).isEmpty();
+    }
+
+    @Test
+    void artesaoInexistenteFalhaComErroDeRecursoNaoEncontrado() {
+        assertThatThrownBy(() -> service.consultar("artesao-inexistente"))
+                .isInstanceOf(PerfilNaoEncontradoException.class);
     }
 
     private Conta conta(Papel papel) {
@@ -93,6 +106,11 @@ class PerfilArtesaoServiceTest {
         @Override
         public Optional<PerfilArtesao> buscarPorSlug(String slug) {
             return salvos.stream().filter(perfil -> perfil.slug().equals(slug)).findFirst();
+        }
+
+        @Override
+        public Optional<PerfilArtesao> buscarPorSlugParaAtualizar(String slug) {
+            return buscarPorSlug(slug);
         }
 
         @Override
