@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import br.com.balaio.profile.account.application.port.in.ConsultarUsuarioAtualUseCase;
+import br.com.balaio.profile.account.imagem.ImagemContaService;
 import br.com.balaio.profile.account.security.ValidarSessaoAdapter;
 
 @RestController
@@ -19,10 +20,13 @@ import br.com.balaio.profile.account.security.ValidarSessaoAdapter;
 public class UsuarioAtualController {
     private final ValidarSessaoAdapter sessoes;
     private final ConsultarUsuarioAtualUseCase usuarios;
+    private final ImagemContaService imagens;
 
-    public UsuarioAtualController(ValidarSessaoAdapter sessoes, ConsultarUsuarioAtualUseCase usuarios) {
+    public UsuarioAtualController(ValidarSessaoAdapter sessoes, ConsultarUsuarioAtualUseCase usuarios,
+            ImagemContaService imagens) {
         this.sessoes = sessoes;
         this.usuarios = usuarios;
+        this.imagens = imagens;
     }
 
     @GetMapping(produces = MediaType.APPLICATION_JSON_VALUE)
@@ -30,6 +34,6 @@ public class UsuarioAtualController {
         var identidade = sessoes.validarBearer(Collections.list(request.getHeaders(HttpHeaders.AUTHORIZATION)));
         var conta = usuarios.consultar(identidade);
         return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "no-store")
-                .body(new CadastroPublicoResposta<>(UsuarioPublicoResposta.de(conta), null));
+                .body(new CadastroPublicoResposta<>(UsuarioPublicoResposta.de(conta, imagens.imagemDe(conta.id())), null));
     }
 }

@@ -1,6 +1,8 @@
 package br.com.balaio.profile.artisan.api;
 
+import br.com.balaio.profile.account.imagem.ImagemContaController;
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.Set;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -14,7 +16,7 @@ public class MidiaContentTypeExceptionHandler {
             HttpMediaTypeNotSupportedException exception, HttpServletRequest request)
             throws HttpMediaTypeNotSupportedException {
         if (!"PUT".equals(request.getMethod())
-                || !"/api/v1/artesao/me/imagem".equals(request.getRequestURI())) {
+                || !Set.of("/api/v1/artesao/me/imagem", ImagemContaController.CAMINHO).contains(request.getRequestURI())) {
             throw exception;
         }
         var erro = new PerfilArtesaoExceptionHandler.Erro("FORMATO_NAO_SUPORTADO",

@@ -328,7 +328,18 @@ Provisionamento (desenvolvimento e homologação): `PATCH /api/v1/admin/contas/{
 | Transição não permitida (ex.: artesão → organizador) | 409 | `TRANSICAO_PAPEL_INVALIDA` |
 | Sucesso | 204 sem corpo e sem token novo | — |
 
-Procedimento: criar a conta como comprador pelo cadastro público; autenticar um administrador; chamar o `PATCH` com o `id` da conta; pedir à conta alvo que encerre a sessão e faça novo login. O JWT anterior mantém a claim antiga até `exp`, com janela de até 3600 segundos; não há revogação imediata neste contrato. Para remover o papel, use `{"papel":"comprador"}` e repita o mesmo procedimento de novo login.
+Busca do `id` pelo e-mail: `GET /api/v1/admin/contas?email=<email>`, com a mesma validação de administrador. O e-mail é normalizado como no login (espaços e caixa). Resposta `200` no envelope padrão com `dados: {id, nome, email, papel}`; nunca devolve senha nem estado de troca de senha. A autorização é verificada antes do e-mail, então um não administrador recebe `403` mesmo com e-mail inválido.
+
+| Situação | Status | `erro.codigo` |
+| --- | --- | --- |
+| Sem JWT válido | 401 | `NAO_AUTENTICADO` |
+| Chamador não administrador ou troca de senha pendente | 403 | `SEM_PERMISSAO` |
+| E-mail ausente ou inválido | 400 | `EMAIL_INVALIDO` |
+| Nenhuma conta com o e-mail | 404 | `CONTA_NAO_ENCONTRADA` |
+
+No front, a tela `/admin/accounts` faz a busca e o `PATCH`.
+
+Procedimento: criar a conta como comprador pelo cadastro público; autenticar um administrador; buscar o `id` pelo e-mail e chamar o `PATCH` com ele; pedir à conta alvo que encerre a sessão e faça novo login. O JWT anterior mantém a claim antiga até `exp`, com janela de até 3600 segundos; não há revogação imediata neste contrato. Para remover o papel, use `{"papel":"comprador"}` e repita o mesmo procedimento de novo login.
 
 ## Testes e escopo
 

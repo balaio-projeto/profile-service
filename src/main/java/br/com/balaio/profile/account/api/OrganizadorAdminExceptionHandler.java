@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import br.com.balaio.profile.account.application.AcessoNegadoException;
 import br.com.balaio.profile.account.application.AlteracaoPapelException;
 import br.com.balaio.profile.account.application.AlteracaoPapelException.Motivo;
+import br.com.balaio.profile.account.application.BuscaContaAdminException;
 
 @RestControllerAdvice(assignableTypes = OrganizadorAdminController.class)
 public class OrganizadorAdminExceptionHandler {
@@ -37,6 +38,15 @@ public class OrganizadorAdminExceptionHandler {
             case TRANSICAO_NAO_PERMITIDA -> erro(HttpStatus.CONFLICT, "TRANSICAO_PAPEL_INVALIDA", exception.getMessage());
             case CONFLITO_ATUALIZACAO -> erro(HttpStatus.CONFLICT, "CONFLITO_ATUALIZACAO", exception.getMessage());
             case FALHA_ALTERACAO -> erro(HttpStatus.INTERNAL_SERVER_ERROR, "ALTERACAO_PAPEL_INDISPONIVEL", exception.getMessage());
+        };
+    }
+
+    @ExceptionHandler(BuscaContaAdminException.class)
+    public ResponseEntity<CadastroPublicoResposta<Void>> buscaConta(BuscaContaAdminException exception) {
+        return switch (exception.motivo()) {
+            case EMAIL_INVALIDO -> erro(HttpStatus.BAD_REQUEST, "EMAIL_INVALIDO", exception.getMessage());
+            case CONTA_NAO_ENCONTRADA -> erro(HttpStatus.NOT_FOUND, "CONTA_NAO_ENCONTRADA", exception.getMessage());
+            case FALHA_CONSULTA -> erro(HttpStatus.INTERNAL_SERVER_ERROR, "CONSULTA_CONTA_INDISPONIVEL", exception.getMessage());
         };
     }
 

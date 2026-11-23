@@ -8,6 +8,9 @@ public interface MidiasPerfilPort {
     void reservar(MidiaPerfil midia);
     void ativar(MidiaPerfil midia);
     void remover(UUID perfilId);
+    void ativarDaConta(MidiaPerfil midia);
+    void removerDaConta(UUID contaId);
+    String imagemDaConta(UUID contaId);
     Optional<MidiaPerfil> vinculada(UUID id);
     List<MidiaPerfil> candidatasLimpeza();
     boolean prepararExclusao(MidiaPerfil midia);

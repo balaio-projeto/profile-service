@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import br.com.balaio.profile.account.application.port.in.EfetuarLoginUseCase;
+import br.com.balaio.profile.account.imagem.ImagemContaService;
 import br.com.balaio.profile.account.security.CookieSessaoAdapter;
 import br.com.balaio.profile.account.security.EmissorJwtAdapter;
 
@@ -31,19 +32,22 @@ public class AutenticacaoController {
     private final CookieSessaoAdapter cookies;
     private final AlterarPropriaSenhaUseCase alterarSenha;
     private final ValidarSessaoAdapter sessoes;
+    private final ImagemContaService imagens;
 
     public AutenticacaoController(
             EfetuarLoginUseCase login,
             EmissorJwtAdapter emissor,
             CookieSessaoAdapter cookies,
             AlterarPropriaSenhaUseCase alterarSenha,
-            ValidarSessaoAdapter sessoes) {
+            ValidarSessaoAdapter sessoes,
+            ImagemContaService imagens) {
 
         this.login = login;
         this.emissor = emissor;
         this.cookies = cookies;
         this.alterarSenha = alterarSenha;
         this.sessoes = sessoes;
+        this.imagens = imagens;
     }
 
     @PostMapping(value = { "/login", "/entrar" }, consumes = MediaType.APPLICATION_JSON_VALUE,
@@ -55,7 +59,7 @@ public class AutenticacaoController {
         return ResponseEntity.ok()
                 .header(HttpHeaders.CACHE_CONTROL, "no-store")
                 .header(HttpHeaders.SET_COOKIE, cookies.criar(token, request.isSecure()).toString())
-                .body(new CadastroPublicoResposta<>(UsuarioPublicoResposta.de(conta), null));
+                .body(new CadastroPublicoResposta<>(UsuarioPublicoResposta.de(conta, imagens.imagemDe(conta.id())), null));
     }
 
     @PostMapping(value = "/logout", produces = MediaType.APPLICATION_JSON_VALUE)
