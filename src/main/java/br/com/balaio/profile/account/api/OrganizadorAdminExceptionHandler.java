@@ -18,6 +18,9 @@ public class OrganizadorAdminExceptionHandler {
     public ResponseEntity<CadastroPublicoResposta<Void>> acessoNegado(AcessoNegadoException exception) {
         boolean naoAutenticado = exception.motivo() == AcessoNegadoException.Motivo.NAO_AUTENTICADO
                 || exception.motivo() == AcessoNegadoException.Motivo.CONTA_INDISPONIVEL;
+        if (exception.motivo() == AcessoNegadoException.Motivo.TROCA_SENHA_OBRIGATORIA) {
+            return erro(HttpStatus.FORBIDDEN, "TROCA_SENHA_OBRIGATORIA", exception.getMessage());
+        }
         return naoAutenticado
                 ? erro(HttpStatus.UNAUTHORIZED, "NAO_AUTENTICADO", "Autenticação necessária.")
                 : erro(HttpStatus.FORBIDDEN, "SEM_PERMISSAO", "Operação não permitida.");

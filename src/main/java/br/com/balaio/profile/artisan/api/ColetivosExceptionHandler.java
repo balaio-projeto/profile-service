@@ -14,11 +14,13 @@ public class ColetivosExceptionHandler {
     public ResponseEntity<CadastroPublicoResposta<Void>> acessoNegado(AcessoNegadoException exception) {
         boolean naoAutenticado = exception.motivo() == AcessoNegadoException.Motivo.NAO_AUTENTICADO
                 || exception.motivo() == AcessoNegadoException.Motivo.CONTA_INDISPONIVEL;
+        boolean trocaSenhaPendente = exception.motivo() == AcessoNegadoException.Motivo.TROCA_SENHA_OBRIGATORIA;
         HttpStatus status = naoAutenticado ? HttpStatus.UNAUTHORIZED : HttpStatus.FORBIDDEN;
+        String codigo = naoAutenticado ? "NAO_AUTENTICADO" : trocaSenhaPendente ? "TROCA_SENHA_OBRIGATORIA" : "SEM_PERMISSAO";
+        String mensagem = naoAutenticado ? "Autenticação necessária."
+                : trocaSenhaPendente ? exception.getMessage() : "Operação não permitida.";
         return ResponseEntity.status(status)
                 .header("Cache-Control", "no-store")
-                .body(new CadastroPublicoResposta<>(null, new CadastroPublicoResposta.Erro(
-                        naoAutenticado ? "NAO_AUTENTICADO" : "SEM_PERMISSAO",
-                        naoAutenticado ? "Autenticação necessária." : "Operação não permitida.")));
+                .body(new CadastroPublicoResposta<>(null, new CadastroPublicoResposta.Erro(codigo, mensagem)));
     }
 }
