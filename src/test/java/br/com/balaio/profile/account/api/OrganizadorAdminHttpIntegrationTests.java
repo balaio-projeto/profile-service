@@ -238,7 +238,10 @@ class OrganizadorAdminHttpIntegrationTests {
         UUID admin = conta("admin", true);
         conta("comprador", false, "pendente@example.test");
 
-        assertThat(get("pendente@example.test", token(admin)).statusCode()).isEqualTo(403);
+        HttpResponse<String> resposta = get("pendente@example.test", token(admin));
+
+        assertThat(resposta.statusCode()).isEqualTo(403);
+        assertThat(resposta.body()).contains("TROCA_SENHA_OBRIGATORIA").doesNotContain("pendente@example.test");
     }
 
     @Test

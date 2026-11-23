@@ -20,6 +20,7 @@ public class CuradoriaExceptionHandler {
     @ExceptionHandler(AcessoNegadoException.class)
     ResponseEntity<Resposta> acesso(AcessoNegadoException e) {
         boolean semSessao=e.motivo()==AcessoNegadoException.Motivo.NAO_AUTENTICADO || e.motivo()==AcessoNegadoException.Motivo.CONTA_INDISPONIVEL;
+        if (e.motivo()==AcessoNegadoException.Motivo.TROCA_SENHA_OBRIGATORIA) return erro(403,"TROCA_SENHA_OBRIGATORIA",e.getMessage(),null);
         return erro(semSessao?401:403,semSessao?"NAO_AUTENTICADO":"SEM_PERMISSAO","Operação não permitida.",null);
     }
     @ExceptionHandler(OrigemNaoPermitidaException.class)

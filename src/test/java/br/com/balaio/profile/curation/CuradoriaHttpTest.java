@@ -179,6 +179,10 @@ class CuradoriaHttpTest {
         }
         jdbc.update("UPDATE contas SET troca_senha_obrigatoria=true WHERE id=?",admin);
         enviar("GET","/admin/curadoria",null,admin,403);
+        var pendente=HttpRequest.newBuilder(uri("/admin/curadoria")).header("Authorization","Bearer "+token(admin,"admin")).GET().build();
+        assertThat(HTTP.send(pendente,HttpResponse.BodyHandlers.ofString()).body()).contains("TROCA_SENHA_OBRIGATORIA");
+        var outroAdmin=HttpRequest.newBuilder(uri("/admin/curadoria")).header("Authorization","Bearer "+token(outro,"admin")).GET().build();
+        assertThat(HTTP.send(outroAdmin,HttpResponse.BodyHandlers.ofString()).body()).doesNotContain("TROCA_SENHA_OBRIGATORIA");
         decidir(id,"aprovada","",admin,403);
     }
     @Test void semSessaoOuJwtInvalidoRetorna401() throws Exception {
