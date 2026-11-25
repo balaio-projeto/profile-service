@@ -90,7 +90,15 @@ class RecoveryMailpitHttpTest {
         var repetida=reset(token,"OutraSenhaSegura789!");
         assertThat(repetida.statusCode()).isEqualTo(400);
         assertThat(repetida.body()).contains("TOKEN_INVALIDO");
-        assertThat(mail("GET","/api/v1/messages").get("total").asInt()).isEqualTo(1);
+        assertThat(mensagensPara(ASSUNTO_RECUPERACAO)).hasSize(1);
+        var aviso=aguardar("Sua senha foi redefinida");
+        assertThat(aviso.get("HTML").asText()).contains("Sua senha foi redefinida","balaio-logo.png");
+        assertThat(aviso.get("Text").asText()).doesNotContain(token);
+    }
+    @Test void cadastroEnviaBoasVindasComLayoutDaMarca() throws Exception {
+        var boasVindas=aguardar("Boas-vindas ao Balaio");
+        assertThat(boasVindas.get("HTML").asText()).contains("Boas-vindas, Pessoa!","Conhecer a vitrine","ARTESANATO DE PERNAMBUCO");
+        assertThat(boasVindas.get("Text").asText()).contains("Sua conta no Balaio está pronta.");
     }
     @Test void linkSmtpExpiradoEDesconhecidoNaoAlteramCredencial() throws Exception {
         post("/auth/recuperacao",Map.of("email",email));
@@ -103,7 +111,7 @@ class RecoveryMailpitHttpTest {
     @Test void pedidosRepetidosNaoDuplicamEntregaSmtp() throws Exception {
         var primeira=post("/auth/recuperacao",Map.of("email",email)); receber();
         assertThat(post("/auth/recuperacao",Map.of("email",email)).body()).isEqualTo(primeira.body());
-        assertThat(mail("GET","/api/v1/messages").get("total").asInt()).isEqualTo(1);
+        assertThat(mensagensPara(ASSUNTO_RECUPERACAO)).hasSize(1);
         assertThat(jdbc.queryForObject("SELECT count(*) FROM password_recovery WHERE conta_id=?",Integer.class,conta)).isEqualTo(1);
     }
     @Test void acentosRespeitamBytesUtf8SemConsumirTokenEmSenhaInvalida() throws Exception {
@@ -127,17 +135,29 @@ class RecoveryMailpitHttpTest {
     @Test void dtoDeRedefinicaoNaoExibeTokenOuSenhaEmLogs() {
         assertThat(new RecoveryController.Reset("token-sintetico","senha-sintetica").toString()).isEqualTo("Reset[REDACTED]");
     }
+    static final String ASSUNTO_RECUPERACAO="Redefina sua senha no Balaio";
     JsonNode receber() throws Exception {
+        return aguardar(ASSUNTO_RECUPERACAO);
+    }
+    JsonNode aguardar(String assunto) throws Exception {
         long deadline=System.nanoTime()+Duration.ofSeconds(15).toNanos();
         while(System.nanoTime()<deadline) {
-            var mensagens=mail("GET","/api/v1/messages").get("messages");
-            if(mensagens!=null && !mensagens.isEmpty()) {
-                String id=mensagens.get(0).get("ID").asText();
-                return mail("GET","/api/v1/message/"+id);
-            }
+            var mensagens=mensagensPara(assunto);
+            if(!mensagens.isEmpty()) return mail("GET","/api/v1/message/"+mensagens.get(0).get("ID").asText());
             Thread.sleep(100);
         }
-        throw new AssertionError("E-mail não recebido pelo Mailpit de teste.");
+        throw new AssertionError("E-mail não recebido pelo Mailpit de teste: "+assunto);
+    }
+    List<JsonNode> mensagensPara(String assunto) throws Exception {
+        var mensagens=mail("GET","/api/v1/messages").get("messages");
+        var encontradas=new java.util.ArrayList<JsonNode>();
+        if(mensagens==null) return encontradas;
+        for(JsonNode mensagem:mensagens) {
+            boolean paraConta=false;
+            for(JsonNode destino:mensagem.get("To")) paraConta|=email.equals(destino.get("Address").asText());
+            if(paraConta && assunto.equals(mensagem.get("Subject").asText())) encontradas.add(mensagem);
+        }
+        return encontradas;
     }
     String token(JsonNode mensagem) {
         String text=mensagem.get("Text").asText();
