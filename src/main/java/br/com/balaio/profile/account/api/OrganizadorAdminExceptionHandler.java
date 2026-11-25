@@ -5,6 +5,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import br.com.balaio.profile.account.application.AcessoNegadoException;
 import br.com.balaio.profile.account.application.AlteracaoPapelException;
@@ -27,7 +28,7 @@ public class OrganizadorAdminExceptionHandler {
     }
 
     @ExceptionHandler({ OrganizadorAdminController.OrganizadorInvalidoException.class,
-            HttpMessageNotReadableException.class })
+            HttpMessageNotReadableException.class, MethodArgumentTypeMismatchException.class })
     public ResponseEntity<CadastroPublicoResposta<Void>> entradaInvalida() {
         return erro(HttpStatus.BAD_REQUEST, "REQUISICAO_INVALIDA", "Dados da requisição inválidos.");
     }
@@ -50,6 +51,7 @@ public class OrganizadorAdminExceptionHandler {
             case EMAIL_INVALIDO -> erro(HttpStatus.BAD_REQUEST, "EMAIL_INVALIDO", exception.getMessage());
             case CONTA_NAO_ENCONTRADA -> erro(HttpStatus.NOT_FOUND, "CONTA_NAO_ENCONTRADA", exception.getMessage());
             case FALHA_CONSULTA -> erro(HttpStatus.INTERNAL_SERVER_ERROR, "CONSULTA_CONTA_INDISPONIVEL", exception.getMessage());
+            case FILTRO_INVALIDO -> erro(HttpStatus.BAD_REQUEST, "REQUISICAO_INVALIDA", exception.getMessage());
         };
     }
 

@@ -6,6 +6,7 @@ import java.util.List;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.Cookie;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -23,6 +24,7 @@ import br.com.balaio.profile.account.application.AlterarPropriaSenhaComando;
 import br.com.balaio.profile.account.application.AcessoNegadoException;
 import br.com.balaio.profile.account.application.port.in.AlterarPropriaSenhaUseCase;
 import br.com.balaio.profile.account.security.ValidarSessaoAdapter;
+import br.com.balaio.profile.notification.AvisoConta;
 
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -33,6 +35,7 @@ public class AutenticacaoController {
     private final AlterarPropriaSenhaUseCase alterarSenha;
     private final ValidarSessaoAdapter sessoes;
     private final ImagemContaService imagens;
+    private final ApplicationEventPublisher eventos;
 
     public AutenticacaoController(
             EfetuarLoginUseCase login,
@@ -40,7 +43,9 @@ public class AutenticacaoController {
             CookieSessaoAdapter cookies,
             AlterarPropriaSenhaUseCase alterarSenha,
             ValidarSessaoAdapter sessoes,
-            ImagemContaService imagens) {
+            ImagemContaService imagens,
+            ApplicationEventPublisher eventos) {
+        this.eventos = eventos;
 
         this.login = login;
         this.emissor = emissor;
@@ -87,6 +92,7 @@ public class AutenticacaoController {
                         requisicao.novaSenha()
                 )
         );
+        eventos.publishEvent(new AvisoConta(identidade.contaId(), AvisoConta.Tipo.SENHA_ALTERADA));
 
         return ResponseEntity.ok()
                 .header(HttpHeaders.CACHE_CONTROL, "no-store")

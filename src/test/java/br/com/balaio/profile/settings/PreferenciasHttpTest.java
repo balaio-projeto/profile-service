@@ -37,10 +37,48 @@ class PreferenciasHttpTest {
         assertThat(criado.body()).contains("\"principal\":true");
         assertThat(enviar("GET","/usuario/enderecos",null,comprador).body()).contains(id);
         assertThat(enviar("GET","/usuario",null,comprador).body()).doesNotContain("enderecos");
-        assertStatus(enviar("GET","/usuario/enderecos/"+id,null,outro),403);
+        assertStatus(enviar("GET","/usuario/enderecos/"+id,null,outro),404);
         assertStatus(enviar("GET","/usuario/enderecos/"+id,null,null),401);
         assertStatus(enviar("DELETE","/usuario/enderecos/"+id,null,comprador),200);
         assertThat(enviar("GET","/usuario/enderecos",null,comprador).body()).contains("\"dados\":[]");
+    }
+    @Test void artesaoCadastraEnderecoDeEntregaEOrganizadorEAdminNao() throws Exception {
+        var criado=enviar("POST","/usuario/enderecos","{\"apelido\":\"Ateliê\",\"rua\":\"Rua C, 3\",\"bairro\":\"Centro, Olinda, PE\",\"cep\":\"53000-000\"}",dono);
+        assertStatus(criado,200);
+        String id=JSON.readTree(criado.body()).get("dados").get("id").asText();
+        assertThat(enviar("GET","/usuario/enderecos",null,dono).body()).contains(id,"Rua C, 3");
+        assertStatus(enviar("GET","/usuario/enderecos/"+id,null,dono),200);
+        assertStatus(enviar("GET","/usuario/enderecos/"+id,null,comprador),404);
+        assertThat(enviar("GET","/usuario/enderecos",null,outro).body()).doesNotContain(id);
+        for(String papel:List.of("organizador","admin")) {
+            UUID conta=criar(papel);
+            try {
+                var recusa=enviar("GET","/usuario/enderecos",null,conta);
+                assertStatus(recusa,403);
+                assertStatus(enviar("POST","/usuario/enderecos","{\"apelido\":\"Casa\",\"rua\":\"Rua D, 4\",\"bairro\":\"Centro, Recife, PE\",\"cep\":\"50000-000\"}",conta),403);
+            } finally {
+                jdbc.update("DELETE FROM contas WHERE id=?",conta);
+            }
+        }
+    }
+    @Test void enderecoGuardaNumeroEComplementoSeparadosDaRua() throws Exception {
+        var criado=enviar("POST","/usuario/enderecos","{\"apelido\":\"Casa\",\"rua\":\"Rua da Aurora\",\"numero\":\"240\",\"complemento\":\"Apto 302\",\"bairro\":\"Boa Vista, Recife, PE\",\"cep\":\"50050-000\"}",comprador);
+        assertStatus(criado,200);
+        var dados=JSON.readTree(criado.body()).get("dados");
+        assertThat(dados.get("rua").asText()).isEqualTo("Rua da Aurora");
+        assertThat(dados.get("numero").asText()).isEqualTo("240");
+        assertThat(dados.get("complemento").asText()).isEqualTo("Apto 302");
+        String id=dados.get("id").asText();
+        var semComplemento=enviar("PATCH","/usuario/enderecos/"+id,"{\"complemento\":\"\"}",comprador);
+        assertStatus(semComplemento,200);
+        var atualizado=JSON.readTree(semComplemento.body()).get("dados");
+        assertThat(atualizado.get("numero").asText()).isEqualTo("240");
+        assertThat(atualizado.get("complemento").isNull()).isTrue();
+        assertStatus(enviar("PATCH","/usuario/enderecos/"+id,"{\"numero\":\""+"9".repeat(21)+"\"}",comprador),400);
+        assertStatus(enviar("PATCH","/usuario/enderecos/"+id,"{\"numero\":240}",comprador),400);
+        var semNumero=enviar("POST","/usuario/enderecos","{\"apelido\":\"Antigo\",\"rua\":\"Rua B, 2\",\"bairro\":\"Centro, Recife, PE\",\"cep\":\"50000-000\"}",comprador);
+        assertStatus(semNumero,200);
+        assertThat(JSON.readTree(semNumero.body()).get("dados").get("numero").isNull()).isTrue();
     }
     @LocalServerPort int port;
     @Autowired JdbcTemplate jdbc;

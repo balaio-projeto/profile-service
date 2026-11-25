@@ -19,6 +19,8 @@ import java.util.HexFormat;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.context.ApplicationEventPublisher;
+
+import br.com.balaio.profile.notification.AvisoConta;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -88,6 +90,7 @@ public class RecoveryService {
         recovery.consumedAt = now;
         tokens.saveAndFlush(recovery);
         tokens.consumeAllForAccount(accountId, now);
+        events.publishEvent(new AvisoConta(accountId, AvisoConta.Tipo.SENHA_REDEFINIDA));
         return true;
     }
 

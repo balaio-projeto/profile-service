@@ -1,11 +1,11 @@
 package br.com.balaio.profile.curation;
 
 import br.com.balaio.profile.account.api.CadastroPublicoResposta;
+import br.com.balaio.profile.account.api.RespostaPaginada;
 import br.com.balaio.profile.account.application.IdentidadeAutenticada;
 import br.com.balaio.profile.account.security.ValidarSessaoAdapter;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.ResponseEntity;
@@ -26,8 +26,12 @@ public class CuradoriaController {
         return resposta(service.solicitar(identidade(request),body));
     }
     @GetMapping(value="/admin/curadoria", produces="application/json")
-    public ResponseEntity<CadastroPublicoResposta<List<CuradoriaService.Solicitacao>>> fila(HttpServletRequest request) {
-        return resposta(service.fila(identidade(request)));
+    public ResponseEntity<RespostaPaginada<CuradoriaService.Solicitacao>> fila(
+            @RequestParam(required=false) String situacao, @RequestParam(required=false) String busca,
+            @RequestParam(required=false) Integer pagina, @RequestParam(required=false) Integer tamanho,
+            @RequestParam(defaultValue="false") boolean apenasTotal, HttpServletRequest request) {
+        var fila=service.fila(identidade(request),situacao,busca,pagina,tamanho,apenasTotal);
+        return ResponseEntity.ok().header("Cache-Control","no-store").body(RespostaPaginada.de(fila.itens(),fila.janela()));
     }
     @PostMapping(value="/admin/curadoria/{id}/decisao", consumes="application/json", produces="application/json")
     public ResponseEntity<CadastroPublicoResposta<CuradoriaService.Solicitacao>> decidir(@PathVariable UUID id,@RequestBody Map<String,Object> body,HttpServletRequest request) {

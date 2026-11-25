@@ -18,7 +18,8 @@ import br.com.balaio.profile.account.api.CadastroPublicoResposta;
 
 @RestController
 public class OrigemFreteInternaController {
-    public record OrigemFrete(String cepOrigem, int prazoPadraoDias, boolean encomendasPausadas) {
+    public record OrigemFrete(String cepOrigem, int prazoPadraoDias, boolean encomendasPausadas,
+            boolean aceitaRetirada, boolean aceitaEntregaLocal, String retiradaBairro, String retiradaCidade) {
         @Override public String toString() { return "OrigemFrete[REDACTED]"; }
     }
 
@@ -38,19 +39,26 @@ public class OrigemFreteInternaController {
         if (!tokenValido(token))
             return erro(HttpStatus.FORBIDDEN, "SEM_PERMISSAO", "Operação interna não permitida.");
         var origem = jdbc.query("""
-                SELECT c.cep_origem, c.prazo_padrao_dias, c.encomendas_pausadas
+                SELECT c.cep_origem, c.prazo_padrao_dias, c.encomendas_pausadas, c.aceita_retirada,
+                       c.aceita_entrega_local, c.retirada_bairro, c.retirada_cidade
                 FROM perfis_artesao p LEFT JOIN configuracoes_atelie c ON c.perfil_id = p.id
                 WHERE p.conta_id = ?
                 """, (rs, linha) -> {
                     String cep = rs.getString("cep_origem");
                     Integer prazo = rs.getObject("prazo_padrao_dias", Integer.class);
                     return new OrigemFrete(cepSomenteDigitos(cep),
-                            prazo == null ? PRAZO_PADRAO_SEM_CONFIGURACAO : prazo, rs.getBoolean("encomendas_pausadas"));
+                            prazo == null ? PRAZO_PADRAO_SEM_CONFIGURACAO : prazo, rs.getBoolean("encomendas_pausadas"),
+                            rs.getBoolean("aceita_retirada"), rs.getBoolean("aceita_entrega_local"),
+                            textoOuNulo(rs.getString("retirada_bairro")), textoOuNulo(rs.getString("retirada_cidade")));
                 }, id).stream().findFirst();
         if (origem.isEmpty())
             return erro(HttpStatus.NOT_FOUND, "PERFIL_NAO_ENCONTRADO", "Ateliê não encontrado.");
         return ResponseEntity.ok().cacheControl(CacheControl.noStore())
                 .body(new CadastroPublicoResposta<>(origem.get(), null));
+    }
+
+    private static String textoOuNulo(String texto) {
+        return texto == null || texto.isBlank() ? null : texto;
     }
 
     private static String cepSomenteDigitos(String cep) {

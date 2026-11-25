@@ -2,6 +2,7 @@ package br.com.balaio.profile.curation;
 
 import br.com.balaio.profile.account.application.AcessoNegadoException;
 import br.com.balaio.profile.account.application.IdentidadeAutenticada;
+import br.com.balaio.profile.account.application.JanelaPagina;
 import br.com.balaio.profile.account.application.port.in.AutorizarOperacaoAdministrativaUseCase;
 import br.com.balaio.profile.account.application.port.out.ContasPort;
 import br.com.balaio.profile.account.domain.Papel;
@@ -10,6 +11,7 @@ import br.com.balaio.profile.artisan.domain.PerfilArtesao;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -24,6 +26,8 @@ public class CuradoriaService {
             String mensagem, String situacao, Instant solicitadoEm, String motivo, Instant decididoEm,
             String territorio, String tecnica, String imagem, Integer pecasPublicadas) { }
     public record Estado(boolean selo, Solicitacao solicitacao) { }
+    public record PaginaFila(List<Solicitacao> itens, JanelaPagina janela) { }
+    private static final Set<String> SITUACOES_FILA = Set.of("pendente", "ajuste", "aprovada", "todas");
     private static final String CONSULTA = """
             SELECT s.*, p.slug, p.nome, p.atelie, p.territorio, p.tecnica, p.imagem
             FROM solicitacoes_selo s JOIN perfis_artesao p ON p.id=s.perfil_id
@@ -60,11 +64,41 @@ public class CuradoriaService {
         return estado(perfil.id());
     }
 
+    public PaginaFila fila(IdentidadeAutenticada identidade, String situacao, String busca, Integer pagina, Integer tamanho) {
+        return fila(identidade, situacao, busca, pagina, tamanho, false);
+    }
+
     @Transactional
-    public List<Solicitacao> fila(IdentidadeAutenticada identidade) {
+    public PaginaFila fila(IdentidadeAutenticada identidade, String situacao, String busca, Integer pagina, Integer tamanho,
+            boolean apenasTotal) {
         admins.exigirPermissao(identidade);
-        return jdbc.query(CONSULTA + " WHERE s.situacao='pendente' ORDER BY s.solicitado_em,s.id", this::mapear)
-                .stream().map(this::comContagem).toList();
+        String filtro = situacao == null || situacao.isBlank() ? "pendente" : situacao.strip();
+        if (!SITUACOES_FILA.contains(filtro)) throw CuradoriaException.invalido("situacao", "Informe pendente, ajuste, aprovada ou todas.");
+        if (!JanelaPagina.buscaValida(busca)) throw CuradoriaException.invalido("busca", "Informe uma busca de até 100 caracteres.");
+        var condicoes = new ArrayList<String>();
+        var parametros = new ArrayList<Object>();
+        if (!"todas".equals(filtro)) {
+            condicoes.add("s.situacao=?");
+            parametros.add(filtro);
+        }
+        String padrao = JanelaPagina.padraoBusca(busca);
+        if (padrao != null) {
+            condicoes.add("(p.atelie ILIKE ? ESCAPE '!' OR p.nome ILIKE ? ESCAPE '!')");
+            parametros.add(padrao);
+            parametros.add(padrao);
+        }
+        String where = condicoes.isEmpty() ? "" : " WHERE " + String.join(" AND ", condicoes);
+        Long total = jdbc.queryForObject("SELECT count(*) FROM solicitacoes_selo s JOIN perfis_artesao p ON p.id=s.perfil_id" + where,
+                Long.class, parametros.toArray());
+        var janela = JanelaPagina.de(pagina, tamanho, total == null ? 0 : total);
+        if (apenasTotal) return new PaginaFila(List.of(), janela);
+        var argumentos = new ArrayList<Object>(parametros);
+        argumentos.add(janela.tamanho());
+        argumentos.add(janela.deslocamento());
+        var itens = jdbc.query(CONSULTA + where + " ORDER BY s.decidido_em DESC NULLS FIRST,s.solicitado_em,s.id LIMIT ? OFFSET ?",
+                this::mapear, argumentos.toArray()).stream()
+                .map(item -> "pendente".equals(item.situacao()) ? comContagem(item) : item).toList();
+        return new PaginaFila(itens, janela);
     }
 
     @Transactional
