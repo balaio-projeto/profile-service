@@ -13,10 +13,14 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import br.com.balaio.profile.account.application.AlterarPapelComando;
+import br.com.balaio.profile.account.application.ContaAdministrativa;
 import br.com.balaio.profile.account.application.IdentidadeAutenticada;
+import br.com.balaio.profile.account.application.PaginaContasAdmin;
 import br.com.balaio.profile.account.application.port.in.BuscarContaAdminUseCase;
+import br.com.balaio.profile.account.application.port.in.ListarContasAdminUseCase;
 import br.com.balaio.profile.account.application.port.in.ProvisionarOrganizadorUseCase;
 import br.com.balaio.profile.account.domain.Papel;
+import br.com.balaio.profile.account.imagem.ImagemContaService;
 import br.com.balaio.profile.account.security.ValidarSessaoAdapter;
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -29,21 +33,36 @@ import jakarta.servlet.http.HttpServletRequest;
 public class OrganizadorAdminController {
     private final ProvisionarOrganizadorUseCase provisionar;
     private final BuscarContaAdminUseCase buscar;
+    private final ListarContasAdminUseCase listar;
+    private final ImagemContaService imagens;
     private final ValidarSessaoAdapter sessoes;
 
     public OrganizadorAdminController(ProvisionarOrganizadorUseCase provisionar, BuscarContaAdminUseCase buscar,
-            ValidarSessaoAdapter sessoes) {
+            ListarContasAdminUseCase listar, ImagemContaService imagens, ValidarSessaoAdapter sessoes) {
         this.provisionar = provisionar;
         this.buscar = buscar;
+        this.listar = listar;
+        this.imagens = imagens;
         this.sessoes = sessoes;
     }
 
     @GetMapping
-    public ResponseEntity<CadastroPublicoResposta<ContaAdminResposta>> buscarPorEmail(
-            @RequestParam(name = "email", required = false) String email, HttpServletRequest request) {
+    public ResponseEntity<?> buscarOuListar(
+            @RequestParam(name = "email", required = false) String email,
+            @RequestParam(name = "busca", required = false) String busca,
+            @RequestParam(name = "papel", required = false) String papel,
+            @RequestParam(name = "pagina", required = false) Integer pagina,
+            @RequestParam(name = "tamanho", required = false) Integer tamanho, HttpServletRequest request) {
         IdentidadeAutenticada solicitante =
                 sessoes.validarBearer(Collections.list(request.getHeaders("Authorization")));
-        ContaAdminResposta conta = ContaAdminResposta.de(buscar.buscarPorEmail(solicitante, email));
+        if (email == null) {
+            PaginaContasAdmin contas = listar.listar(solicitante, busca, papel, pagina, tamanho);
+            return ResponseEntity.ok().header("Cache-Control", "no-store").body(RespostaPaginada.de(
+                    contas.itens().stream().map(ContaAdminResposta::de).toList(), contas.janela()));
+        }
+        ContaAdministrativa encontrada = buscar.buscarPorEmail(solicitante, email);
+        ContaAdminResposta conta = ContaAdminResposta.de(new ContaAdministrativa(encontrada.id(), encontrada.nome(),
+                encontrada.email(), encontrada.papel(), imagemOuNulo(encontrada)));
         return ResponseEntity.ok().header("Cache-Control", "no-store")
                 .body(new CadastroPublicoResposta<>(conta, null));
     }
@@ -55,6 +74,11 @@ public class OrganizadorAdminController {
                 sessoes.validarBearer(Collections.list(request.getHeaders("Authorization")));
         provisionar.alterar(solicitante, new AlterarPapelComando(id, papelSolicitado(requisicao)));
         return ResponseEntity.noContent().header("Cache-Control", "no-store").build();
+    }
+
+    private String imagemOuNulo(ContaAdministrativa conta) {
+        String imagem = imagens.imagemDe(conta.id());
+        return imagem == null || imagem.isBlank() ? null : imagem;
     }
 
     private static Papel papelSolicitado(AlterarPapelRequisicao requisicao) {

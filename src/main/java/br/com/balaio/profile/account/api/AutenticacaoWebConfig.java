@@ -18,6 +18,6 @@ public class AutenticacaoWebConfig implements WebMvcConfigurer {
                 "/api/v1/auth/entrar", "/api/v1/auth/logout", "/api/v1/auth/recuperacao",
                 "/api/v1/auth/redefinicao","/api/v1/auth/alterar-senha", "/api/v1/artesao/me/imagem",
                 "/api/v1/usuario", "/api/v1/usuario/imagem", "/api/v1/conta/*", "/api/v1/artesaos/*/configuracoes",
-                "/api/v1/artesao/selo", "/api/v1/admin/curadoria/**");
+                "/api/v1/artesao/selo", "/api/v1/admin/curadoria/**", "/api/v1/notificacoes/**");
     }
 }

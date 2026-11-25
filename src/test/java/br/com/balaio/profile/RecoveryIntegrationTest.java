@@ -27,12 +27,17 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.SimpleMailMessage;
+import jakarta.mail.Multipart;
+import jakarta.mail.Part;
+import jakarta.mail.internet.MimeMessage;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.context.annotation.Bean;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.timeout;
 import org.mockito.ArgumentCaptor;
 
@@ -58,6 +63,10 @@ class RecoveryIntegrationTest {
         @EventListener void on(RecoveryMailSender.MailRequested event) { sent.add(event); }
     }
 
+    @BeforeEach void prepararSmtp() {
+        when(sender.createMimeMessage()).thenAnswer(chamada -> new MimeMessage((jakarta.mail.Session) null));
+    }
+
     @BeforeEach @AfterEach void clean() {
         mail.sent.clear();
         jdbc.update("delete from password_recovery");
@@ -78,10 +87,23 @@ class RecoveryIntegrationTest {
         assertThat(stored).isEqualTo(RecoveryService.hash(token)).doesNotContain(token);
         assertThat(jdbc.queryForObject("select count(*) from password_recovery", Long.class)).isEqualTo(1);
         assertThat(mail.sent.element().toString()).doesNotContain(token, EMAIL);
-        ArgumentCaptor<SimpleMailMessage> message = ArgumentCaptor.forClass(SimpleMailMessage.class);
-        verify(sender, timeout(5000)).send(message.capture());
-        assertThat(message.getValue().getTo()).containsExactly(EMAIL);
-        assertThat(message.getValue().getText()).contains("/login/reset?token=" + token);
+        MimeMessage recuperacao = null;
+        long limite = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (recuperacao == null && System.nanoTime() < limite) {
+            ArgumentCaptor<MimeMessage> enviadas = ArgumentCaptor.forClass(MimeMessage.class);
+            try {
+                verify(sender, atLeastOnce()).send(enviadas.capture());
+                for (MimeMessage enviada : enviadas.getAllValues())
+                    if ("Redefina sua senha no Balaio".equals(enviada.getSubject())) recuperacao = enviada;
+            } catch (AssertionError aindaNaoEnviada) {
+                Thread.sleep(50);
+            }
+            if (recuperacao == null) Thread.sleep(50);
+        }
+        assertThat(recuperacao).isNotNull();
+        assertThat(recuperacao.getAllRecipients()).extracting(Object::toString).containsExactly(EMAIL);
+        recuperacao.saveChanges();
+        assertThat(parte(recuperacao, "text/plain")).contains("/login/reset?token=" + token);
     }
 
     @Test void resetChangesExistingCredentialAndRejectsReuse() throws Exception {
@@ -148,4 +170,15 @@ class RecoveryIntegrationTest {
 
     private static String credentials(String password) { return "{\"email\":\"" + EMAIL + "\",\"senha\":\"" + password + "\"}"; }
     private static String resetBody(String token, String password) { return "{\"token\":\"" + token + "\",\"novaSenha\":\"" + password + "\"}"; }
+
+    private static String parte(Part parte, String tipo) throws Exception {
+        if (parte.getContent() instanceof Multipart multipart) {
+            for (int i = 0; i < multipart.getCount(); i++) {
+                String encontrada = parte(multipart.getBodyPart(i), tipo);
+                if (encontrada != null) return encontrada;
+            }
+            return null;
+        }
+        return parte.isMimeType(tipo) ? parte.getContent().toString() : null;
+    }
 }

@@ -87,8 +87,8 @@ class CuradoriaHttpTest {
                 perfil,dono,slug,"Artista","Ateliê teste","História preservada","Pajeú","Xilogravura","/foto-preservada.webp");
     }
     @AfterEach void limpar() {
-        jdbc.update("DELETE FROM solicitacoes_selo WHERE perfil_id IN (SELECT id FROM perfis_artesao WHERE conta_id IN (?,?))",dono,outro);
-        jdbc.update("DELETE FROM contas WHERE id IN (?,?,?,?,?)",dono,outro,comprador,admin,admin2);
+        for(UUID id:papeis.keySet()) jdbc.update("DELETE FROM solicitacoes_selo WHERE perfil_id IN (SELECT id FROM perfis_artesao WHERE conta_id=?)",id);
+        for(UUID id:papeis.keySet()) jdbc.update("DELETE FROM contas WHERE id=?",id);
     }
     @Test void cicloCompletoPersisteHistoricoSeloEPerfilSemAlterarFoto() throws Exception {
         var antes=dados(enviar("GET","/artesaos/"+slug,null,null,200));
@@ -258,6 +258,88 @@ class CuradoriaHttpTest {
         decidir(id,"aprovada","",admin,503);
         assertThat(java.time.Duration.ofNanos(System.nanoTime()-inicio).toSeconds()).isLessThan(8);
         assertThat(dados(enviar("GET","/artesao/selo",null,dono,200)).get("selo").asBoolean()).isFalse();
+    }
+    @Test void filaSemParametrosContinuaComPendentesPaginadosEContaSoAPagina() throws Exception {
+        var pendentes=new ArrayList<String>();
+        for(int i=0;i<12;i++) pendentes.add(solicitacaoEm(artesao("Pessoa "+i,"Ateliê "+i),"pendente",Instant.parse("2026-01-01T00:00:00Z").plusSeconds(i*60L),null));
+        chamadas.set(0);
+        var resposta=JSON.readTree(enviar("GET","/admin/curadoria",null,admin,200).body());
+        assertThat(resposta.get("erro").isNull()).isTrue();
+        assertThat(ids(resposta.get("dados"))).containsExactlyElementsOf(pendentes.subList(0,10));
+        assertThat(paginacao(resposta)).containsExactly(1,10,12,2);
+        assertThat(chamadas.get()).isEqualTo(10);
+        var segunda=JSON.readTree(enviar("GET","/admin/curadoria?pagina=2",null,admin,200).body());
+        assertThat(ids(segunda.get("dados"))).containsExactlyElementsOf(pendentes.subList(10,12));
+        assertThat(paginacao(segunda)).containsExactly(2,10,12,2);
+        assertThat(paginacao(JSON.readTree(enviar("GET","/admin/curadoria?pagina=99&tamanho=5",null,admin,200).body()))).containsExactly(3,5,12,3);
+        assertThat(paginacao(JSON.readTree(enviar("GET","/admin/curadoria?tamanho=500",null,admin,200).body()))).containsExactly(1,50,12,1);
+        int chamadasAntes=chamadas.get();
+        var somenteTotal=JSON.readTree(enviar("GET","/admin/curadoria?situacao=pendente&tamanho=1&apenasTotal=true",null,admin,200).body());
+        assertThat(somenteTotal.get("dados")).isEmpty();
+        assertThat(paginacao(somenteTotal)).containsExactly(1,1,12,12);
+        assertThat(chamadas.get()).isEqualTo(chamadasAntes);
+    }
+    @Test void filaFiltraPorSituacaoEOrdenaDecididasPelaDecisaoMaisRecente() throws Exception {
+        UUID ana=artesao("Ana Rendeira","Casa da Renda"), bia=artesao("Bia Barro","Barro Vivo"), caio=artesao("Caio Couro","Couro Fino");
+        String pendente=solicitacaoEm(ana,"pendente",Instant.parse("2026-03-01T00:00:00Z"),null);
+        String ajusteAntigo=solicitacaoEm(bia,"ajuste",Instant.parse("2026-01-01T00:00:00Z"),Instant.parse("2026-01-05T00:00:00Z"));
+        String ajusteRecente=solicitacaoEm(caio,"ajuste",Instant.parse("2026-01-02T00:00:00Z"),Instant.parse("2026-02-05T00:00:00Z"));
+        String aprovada=solicitacaoEm(bia,"aprovada",Instant.parse("2026-02-01T00:00:00Z"),Instant.parse("2026-02-10T00:00:00Z"));
+        chamadas.set(0);
+        var ajustes=JSON.readTree(enviar("GET","/admin/curadoria?situacao=ajuste",null,admin,200).body());
+        assertThat(ids(ajustes.get("dados"))).containsExactly(ajusteRecente,ajusteAntigo);
+        assertThat(ajustes.get("dados").get(0).get("motivo").asText()).isEqualTo("Melhore as fotos");
+        assertThat(ajustes.get("dados").get(0).get("pecasPublicadas").asInt()).isEqualTo(3);
+        assertThat(ajustes.get("dados").get(0).get("decididoEm").asText()).isEqualTo("2026-02-05T00:00:00Z");
+        assertThat(chamadas.get()).isZero();
+        assertThat(ids(dados(enviar("GET","/admin/curadoria?situacao=aprovada",null,admin,200)))).containsExactly(aprovada);
+        var todas=JSON.readTree(enviar("GET","/admin/curadoria?situacao=todas",null,admin,200).body());
+        assertThat(ids(todas.get("dados"))).containsExactly(pendente,aprovada,ajusteRecente,ajusteAntigo);
+        assertThat(paginacao(todas)).containsExactly(1,10,4,1);
+        assertThat(ids(dados(enviar("GET","/admin/curadoria?situacao=pendente",null,admin,200)))).containsExactly(pendente);
+        enviar("GET","/admin/curadoria?situacao=recusada",null,admin,400);
+        enviar("GET","/admin/curadoria?pagina=abc",null,admin,400);
+        enviar("GET","/admin/curadoria?situacao=todas",null,comprador,403);
+        enviar("GET","/admin/curadoria?situacao=todas",null,null,401);
+    }
+    @Test void buscaPorAtelieOuArtesaoSemDiferenciarCaixaEComCuringasLiterais() throws Exception {
+        String renda=solicitacaoEm(artesao("Ana Rendeira","Casa da Renda"),"pendente",Instant.parse("2026-01-01T00:00:00Z"),null);
+        String barro=solicitacaoEm(artesao("Bia Barro","Barro_Vivo 100%"),"pendente",Instant.parse("2026-01-02T00:00:00Z"),null);
+        String ajuste=solicitacaoEm(artesao("Ana Ceramista","Forno Aceso"),"ajuste",Instant.parse("2026-01-03T00:00:00Z"),Instant.parse("2026-01-04T00:00:00Z"));
+        assertThat(ids(dados(enviar("GET","/admin/curadoria?busca=CASA%20DA",null,admin,200)))).containsExactly(renda);
+        assertThat(ids(dados(enviar("GET","/admin/curadoria?busca=bia",null,admin,200)))).containsExactly(barro);
+        assertThat(ids(dados(enviar("GET","/admin/curadoria?situacao=todas&busca=%20ana%20",null,admin,200)))).containsExactly(renda,ajuste);
+        var percentual=JSON.readTree(enviar("GET","/admin/curadoria?busca=%25",null,admin,200).body());
+        assertThat(ids(percentual.get("dados"))).containsExactly(barro);
+        assertThat(paginacao(percentual)).containsExactly(1,10,1,1);
+        assertThat(ids(dados(enviar("GET","/admin/curadoria?busca=o_V",null,admin,200)))).containsExactly(barro);
+        var vazia=JSON.readTree(enviar("GET","/admin/curadoria?busca=inexistente",null,admin,200).body());
+        assertThat(vazia.get("dados").size()).isZero();
+        assertThat(paginacao(vazia)).containsExactly(1,10,0,1);
+        enviar("GET","/admin/curadoria?busca="+"x".repeat(101),null,admin,400);
+    }
+    UUID artesao(String nome,String atelie) {
+        UUID id=conta("artesao"), perfilId=UUID.randomUUID();
+        jdbc.update("INSERT INTO perfis_artesao(id,conta_id,slug,nome,atelie,historia,territorio,tecnica,imagem) VALUES (?,?,?,?,?,?,?,?,?)",
+                perfilId,id,"artesao-"+id,nome,atelie,"","Agreste","Cerâmica","/foto.webp");
+        return perfilId;
+    }
+    String solicitacaoEm(UUID perfilId,String situacao,Instant solicitadoEm,Instant decididoEm) {
+        UUID id=UUID.randomUUID();
+        boolean decidida=!"pendente".equals(situacao);
+        jdbc.update("INSERT INTO solicitacoes_selo(id,perfil_id,mensagem,situacao,solicitado_em,motivo,decidido_em,decidido_por,pecas_publicadas_decisao) VALUES (?,?,?,?,?,?,?,?,?)",
+                id,perfilId,"Mensagem",situacao,java.sql.Timestamp.from(solicitadoEm),"ajuste".equals(situacao)?"Melhore as fotos":null,
+                decidida?java.sql.Timestamp.from(decididoEm):null,decidida?admin:null,decidida?3:null);
+        return id.toString();
+    }
+    static List<String> ids(JsonNode dados) {
+        var ids=new ArrayList<String>();
+        dados.forEach(item->ids.add(item.get("id").asText()));
+        return ids;
+    }
+    static List<Integer> paginacao(JsonNode resposta) {
+        var p=resposta.get("paginacao");
+        return List.of(p.get("pagina").asInt(),p.get("tamanho").asInt(),p.get("total").asInt(),p.get("totalPaginas").asInt());
     }
     UUID conta(String papel) {
         UUID id=UUID.randomUUID(); papeis.put(id,papel);

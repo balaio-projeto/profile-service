@@ -16,6 +16,10 @@ public enum Papel {
         return codigo;
     }
 
+    public static boolean podeComprar(String codigo) {
+        return COMPRADOR.codigo.equals(codigo) || ARTESAO.codigo.equals(codigo);
+    }
+
     public static Papel fromCodigo(String codigo) {
         for (Papel papel : values()) {
             if (papel.codigo.equals(codigo)) {

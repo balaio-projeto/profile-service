@@ -18,9 +18,15 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ConfiguracoesAtelieService {
     public record Configuracoes(String cepOrigem, int prazoPadraoDias, boolean aceitaEncomendas,
-            boolean encomendasPausadas, String chavePix) {
+            boolean encomendasPausadas, String chavePix, boolean aceitaRetirada, boolean aceitaEntregaLocal,
+            String retiradaBairro, String retiradaCidade) {
+        public Configuracoes(String cepOrigem, int prazoPadraoDias, boolean aceitaEncomendas,
+                boolean encomendasPausadas, String chavePix) {
+            this(cepOrigem, prazoPadraoDias, aceitaEncomendas, encomendasPausadas, chavePix, false, false, "", "");
+        }
         @Override public String toString() { return "Configuracoes[REDACTED]"; }
     }
+    private static final int LIMITE_LOCAL_RETIRADA = 80;
     private final ContasPort contas;
     private final PerfilArtesaoPort perfis;
     private final JdbcTemplate jdbc;
@@ -36,7 +42,8 @@ public class ConfiguracoesAtelieService {
     @Transactional
     public Configuracoes atualizar(IdentidadeAutenticada identidade, String slug, Map<String, Object> campos) {
         var perfil = autorizar(identidade, slug, true);
-        EdicaoContaService.validarCampos(campos, Set.of("cepOrigem", "prazoPadraoDias", "aceitaEncomendas", "encomendasPausadas", "chavePix"));
+        EdicaoContaService.validarCampos(campos, Set.of("cepOrigem", "prazoPadraoDias", "aceitaEncomendas", "encomendasPausadas", "chavePix",
+                "aceitaRetirada", "aceitaEntregaLocal", "retiradaBairro", "retiradaCidade"));
         var atual = carregar(perfil.id());
         String cep = atual.cepOrigem();
         if (campos.containsKey("cepOrigem")) {
@@ -58,14 +65,27 @@ public class ConfiguracoesAtelieService {
         boolean aceita = booleano(campos, "aceitaEncomendas", atual.aceitaEncomendas());
         boolean pausadas = booleano(campos, "encomendasPausadas", atual.encomendasPausadas());
         String pix = campos.containsKey("chavePix") ? EdicaoContaService.texto(campos, "chavePix") : atual.chavePix();
+        boolean retirada = booleano(campos, "aceitaRetirada", atual.aceitaRetirada());
+        boolean entregaLocal = booleano(campos, "aceitaEntregaLocal", atual.aceitaEntregaLocal());
+        String bairro = campos.containsKey("retiradaBairro") ? localDeRetirada(campos, "retiradaBairro") : atual.retiradaBairro();
+        String cidade = campos.containsKey("retiradaCidade") ? localDeRetirada(campos, "retiradaCidade") : atual.retiradaCidade();
+        if (retirada && bairro.isEmpty())
+            throw new CamposInvalidosException("retiradaBairro", "Informe o bairro mostrado aos compradores na retirada.");
+        if (retirada && cidade.isEmpty())
+            throw new CamposInvalidosException("retiradaCidade", "Informe a cidade mostrada aos compradores na retirada.");
+        if (entregaLocal && cep.isEmpty())
+            throw new CamposInvalidosException("cepOrigem", "Informe o CEP de origem para oferecer entrega local.");
         jdbc.update("""
-            INSERT INTO configuracoes_atelie (perfil_id, cep_origem, prazo_padrao_dias, aceita_encomendas, encomendas_pausadas, chave_pix)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO configuracoes_atelie (perfil_id, cep_origem, prazo_padrao_dias, aceita_encomendas, encomendas_pausadas, chave_pix,
+            aceita_retirada, aceita_entrega_local, retirada_bairro, retirada_cidade)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (perfil_id) DO UPDATE SET cep_origem=EXCLUDED.cep_origem,
             prazo_padrao_dias=EXCLUDED.prazo_padrao_dias, aceita_encomendas=EXCLUDED.aceita_encomendas,
-            encomendas_pausadas=EXCLUDED.encomendas_pausadas, chave_pix=EXCLUDED.chave_pix
-            """, perfil.id(), cep, prazo, aceita, pausadas, pix);
-        return new Configuracoes(cep, prazo, aceita, pausadas, pix);
+            encomendas_pausadas=EXCLUDED.encomendas_pausadas, chave_pix=EXCLUDED.chave_pix,
+            aceita_retirada=EXCLUDED.aceita_retirada, aceita_entrega_local=EXCLUDED.aceita_entrega_local,
+            retirada_bairro=EXCLUDED.retirada_bairro, retirada_cidade=EXCLUDED.retirada_cidade
+            """, perfil.id(), cep, prazo, aceita, pausadas, pix, retirada, entregaLocal, bairro, cidade);
+        return new Configuracoes(cep, prazo, aceita, pausadas, pix, retirada, entregaLocal, bairro, cidade);
     }
 
     private PerfilArtesao autorizar(IdentidadeAutenticada identidade, String slug, boolean escrita) {
@@ -81,8 +101,16 @@ public class ConfiguracoesAtelieService {
     private Configuracoes carregar(UUID perfil) {
         return jdbc.query("SELECT * FROM configuracoes_atelie WHERE perfil_id=?", (r, n) -> new Configuracoes(
                 r.getString("cep_origem"), r.getInt("prazo_padrao_dias"), r.getBoolean("aceita_encomendas"),
-                r.getBoolean("encomendas_pausadas"), r.getString("chave_pix")), perfil).stream().findFirst()
+                r.getBoolean("encomendas_pausadas"), r.getString("chave_pix"), r.getBoolean("aceita_retirada"),
+                r.getBoolean("aceita_entrega_local"), r.getString("retirada_bairro"), r.getString("retirada_cidade")),
+                perfil).stream().findFirst()
                 .orElse(new Configuracoes("", 1, false, false, ""));
+    }
+    private String localDeRetirada(Map<String, Object> campos, String campo) {
+        if (!(campos.get(campo) instanceof String valor) || valor.chars().anyMatch(Character::isISOControl)
+                || valor.strip().length() > LIMITE_LOCAL_RETIRADA)
+            throw new CamposInvalidosException(campo, "Use até 80 caracteres, sem o endereço completo.");
+        return valor.strip();
     }
     private boolean booleano(Map<String, Object> campos, String campo, boolean anterior) {
         if (!campos.containsKey(campo)) return anterior;
